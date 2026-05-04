@@ -46,6 +46,7 @@ import type {
 } from './types.js';
 import { estimateTokenCount } from './tokens.js';
 import { validateCitations } from './citations.js';
+import { BrokenLinkChecker } from './backlinks.js';
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -333,6 +334,24 @@ export class CompilationEngine {
       });
     }
 
+    // Step 6b — backlink maintenance (WU 040). After successful publish,
+    // re-record inverse backlinks. On recompile we drop the predecessor's
+    // backlinks first so a removed link doesn't leave a stale inverse.
+    if (predecessorVersion) {
+      try {
+        await this.#cfg.metadata.removeBacklinksFor(articleId);
+      } catch {
+        // best-effort; integrity pass surfaces orphaned backlinks
+      }
+    }
+    for (const link of parsed.outboundLinks) {
+      try {
+        await this.#cfg.metadata.recordBacklink(articleId, link.toArticleId, link.linkType);
+      } catch {
+        // best-effort; integrity pass surfaces missing inverses
+      }
+    }
+
     // Step 7 — flip status to published
     await this.#cfg.metadata.upsertArticle({
       id: articleId,
@@ -346,6 +365,19 @@ export class CompilationEngine {
       createdAt: existing?.createdAt ?? compiledAt,
       updatedAt: this.#now(),
     });
+
+    // Step 8 — broken-link check (WU 040). Non-fatal: warnings only.
+    const brokenLinkChecker = new BrokenLinkChecker(this.#cfg.metadata);
+    const brokenReport = await brokenLinkChecker.check(
+      parsed.outboundLinks.map((l) => ({ toArticleId: l.toArticleId, linkType: l.linkType })),
+    );
+    for (const broken of brokenReport.brokenLinks) {
+      warnings.push({
+        kind: 'broken_backlink',
+        message: `Outbound link to '${broken.toArticleId}' is ${broken.reason}`,
+        details: { toArticleId: broken.toArticleId, linkType: broken.linkType, reason: broken.reason },
+      });
+    }
 
     return {
       articleId,

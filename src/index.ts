@@ -82,6 +82,11 @@ export type {
   CitationValidationIssue,
   CitationValidationIssueKind,
 } from './citations.js';
+export {
+  diffOutboundLinks,
+  BrokenLinkChecker,
+} from './backlinks.js';
+export type { OutboundLinkRef, BrokenLinkReport } from './backlinks.js';
 
 export interface NuWikiConfig {
   metadata: MetadataAdapter;
@@ -162,8 +167,37 @@ export class NuWiki {
     throw new NotImplementedError('NuWiki.read', 'WU 041 (role-aware redaction)');
   }
 
-  async followLinks(_request: FollowLinksRequest): Promise<RenderedArticle[]> {
-    throw new NotImplementedError('NuWiki.followLinks', 'WU 040 (backlink graph maintenance)');
+  async followLinks(request: FollowLinksRequest): Promise<RenderedArticle[]> {
+    const traversal = await this.#memoryAdapter.graph.traverse({
+      fromArticleId: request.fromArticleId,
+      linkTypes: request.linkTypes,
+      maxDepth: request.maxDepth ?? 1,
+    });
+    const linkedIds = traversal.visitedArticleIds.filter((id) => id !== request.fromArticleId);
+    const out: RenderedArticle[] = [];
+    const renderedAt = new Date().toISOString();
+    for (const id of linkedIds) {
+      const article = await this.#metadata.getArticle(id);
+      if (!article) continue;
+      // Minimal RenderedArticle shape until WU 041 ships the full renderer.
+      // The body is left empty here; agents reading via NuVector layer 1
+      // already have the article summary. WU 041 will assemble the full
+      // role-redacted body from object storage.
+      out.push({
+        articleId: article.id,
+        documentType: article.documentType,
+        subject: article.subject,
+        version: article.currentVersion,
+        freshness: article.freshness,
+        body: '',
+        citations: [],
+        outboundLinks: [],
+        warnings: [],
+        viewerRole: request.viewerRole,
+        renderedAt,
+      });
+    }
+    return out;
   }
 
   async refresh(ref: RefreshRef): Promise<RefreshResult> {

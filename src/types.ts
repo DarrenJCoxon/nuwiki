@@ -268,7 +268,8 @@ export interface ArticleWarning {
     | 'contradiction'
     | 'limited_view'
     | 'compilation_blocked'
-    | 'over_budget_summary';
+    | 'over_budget_summary'
+    | 'broken_backlink';
   message: string;
   details?: Record<string, unknown>;
 }
