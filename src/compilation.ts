@@ -45,6 +45,7 @@ import type {
   SubjectRef,
 } from './types.js';
 import { estimateTokenCount } from './tokens.js';
+import { validateCitations } from './citations.js';
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -168,6 +169,24 @@ export class CompilationEngine {
         articleId,
         versionId: '',
         warnings: [{ kind, message: `LLM compilation failed: ${message}` }],
+        durationMs: Date.now() - startedAt,
+      });
+    }
+
+    // Step 2c — validate citations (WU 039).
+    // Run after parse + budget; before embed / body / metadata / publish.
+    // No side effects on failure — same invariant as WU 036/037.
+    const retrievedRefs = collectRetrievedSourceRefs(sources);
+    const citationReport = validateCitations(parsed, retrievedRefs);
+    if (!citationReport.ok) {
+      return blockedResult({
+        articleId,
+        versionId: '',
+        warnings: citationReport.issues.map((issue) => ({
+          kind: 'compilation_blocked',
+          message: issue.message,
+          details: { issueKind: issue.kind, ref: issue.ref, ...issue.details },
+        })),
         durationMs: Date.now() - startedAt,
       });
     }
@@ -592,6 +611,37 @@ interface ResolvedSource {
 
 function subjectArticleId(documentType: string, subject: SubjectRef): string {
   return `${documentType}:${subject.kind}:${subject.id}`;
+}
+
+/**
+ * Collect identifying refs from resolved sources for citation validation.
+ *
+ * Database rows contribute their `id` field (when present); NuVector items
+ * contribute their `ref` field (when present). The set is used by the
+ * citation validator's rule 3 (`source_not_retrieved`) — a soft check
+ * that skips citations whose source object lacks any matchable ref.
+ */
+function collectRetrievedSourceRefs(sources: ResolvedSource[]): Set<string> {
+  const refs = new Set<string>();
+  for (const s of sources) {
+    if (s.rows) {
+      for (const row of s.rows) {
+        if (typeof row.id === 'string') refs.add(row.id);
+        if (typeof row.ref === 'string') refs.add(row.ref);
+        if (typeof row.recordId === 'string') refs.add(row.recordId);
+      }
+    }
+    if (s.items) {
+      for (const item of s.items) {
+        if (item && typeof item === 'object') {
+          const obj = item as Record<string, unknown>;
+          if (typeof obj.ref === 'string') refs.add(obj.ref);
+          if (typeof obj.id === 'string') refs.add(obj.id);
+        }
+      }
+    }
+  }
+  return refs;
 }
 
 function pathFor(documentType: string, subject: SubjectRef): string {

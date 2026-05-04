@@ -73,6 +73,15 @@ export {
   assertWithinTokenBudget,
   TokenBudgetExceededError,
 } from './tokens.js';
+export {
+  validateCitations,
+  CitationValidationError,
+} from './citations.js';
+export type {
+  CitationValidationReport,
+  CitationValidationIssue,
+  CitationValidationIssueKind,
+} from './citations.js';
 
 export interface NuWikiConfig {
   metadata: MetadataAdapter;
