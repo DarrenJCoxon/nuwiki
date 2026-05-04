@@ -262,7 +262,13 @@ export interface RenderedLink {
 }
 
 export interface ArticleWarning {
-  kind: 'stale' | 'missing_evidence' | 'contradiction' | 'limited_view' | 'compilation_blocked';
+  kind:
+    | 'stale'
+    | 'missing_evidence'
+    | 'contradiction'
+    | 'limited_view'
+    | 'compilation_blocked'
+    | 'over_budget_summary';
   message: string;
   details?: Record<string, unknown>;
 }

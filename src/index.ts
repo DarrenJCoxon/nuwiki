@@ -67,6 +67,11 @@ export {
   LLM_COMPILATION_OUTPUT_SCHEMA,
   parseLLMCompilationOutput,
 } from './compilation.js';
+export {
+  estimateTokenCount,
+  assertWithinTokenBudget,
+  TokenBudgetExceededError,
+} from './tokens.js';
 
 export interface NuWikiConfig {
   metadata: MetadataAdapter;
@@ -79,6 +84,13 @@ export interface NuWikiConfig {
   /** Test-only injection points. Production callers omit. */
   idFactory?: () => string;
   now?: () => string;
+  /**
+   * Optional token counter for summary-budget enforcement. Defaults to
+   * the heuristic in `./tokens.js`. Consumers who need vendor-accurate
+   * counts inject their own (e.g. `tiktoken`, the Vertex tokenizer);
+   * NuWiki stays model-agnostic per D020.
+   */
+  tokenCounter?: (text: string) => number;
 }
 
 /**
@@ -112,6 +124,7 @@ export class NuWiki {
       getDocumentType: (type) => this.#documentTypes.get(type),
       idFactory: config.idFactory,
       now: config.now,
+      tokenCounter: config.tokenCounter,
     });
   }
 

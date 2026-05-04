@@ -44,6 +44,7 @@ import type {
   SourceQuery,
   SubjectRef,
 } from './types.js';
+import { estimateTokenCount } from './tokens.js';
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -75,6 +76,13 @@ export interface CompilationEngineConfig {
   idFactory?: () => string;
   /** Stable clock; defaults to `() => new Date().toISOString()`. Tests inject a fixed clock. */
   now?: () => string;
+  /**
+   * Token counter used for summary-budget enforcement and layer-1 metadata.
+   * Defaults to `estimateTokenCount` from `./tokens.js`. Consumers who need
+   * vendor-accurate counts (e.g. the Vertex tokenizer, OpenAI's tiktoken)
+   * inject their own here. Model-agnostic per D020.
+   */
+  tokenCounter?: (text: string) => number;
 }
 
 // ---------------------------------------------------------------------------
@@ -87,6 +95,7 @@ export class CompilationEngine {
   readonly #cfg: CompilationEngineConfig;
   readonly #now: () => string;
   readonly #id: () => string;
+  readonly #tokenCounter: (text: string) => number;
   #idCounter = 0;
 
   constructor(cfg: CompilationEngineConfig) {
@@ -98,6 +107,7 @@ export class CompilationEngine {
         this.#idCounter += 1;
         return `id_${this.#idCounter.toString(36)}_${Date.now().toString(36)}`;
       });
+    this.#tokenCounter = cfg.tokenCounter ?? estimateTokenCount;
   }
 
   async compile(request: CompileRequest): Promise<CompilationResult> {
@@ -158,6 +168,27 @@ export class CompilationEngine {
         articleId,
         versionId: '',
         warnings: [{ kind, message: `LLM compilation failed: ${message}` }],
+        durationMs: Date.now() - startedAt,
+      });
+    }
+
+    // Step 2b — enforce summary token budget (WU 037).
+    // The summary populates NuVector layer 1 — the high-traffic retrieval
+    // target. Over-budget summaries fail compilation with no body / metadata
+    // / NuVector writes (per contract §823).
+    const budget = docType.retrievalHints.summaryTokenBudget;
+    const summaryTokens = this.#tokenCounter(parsed.summary);
+    if (summaryTokens > budget) {
+      return blockedResult({
+        articleId,
+        versionId: '',
+        warnings: [
+          {
+            kind: 'over_budget_summary',
+            message: `Summary exceeds token budget: ${summaryTokens} tokens, budget ${budget}`,
+            details: { observed: summaryTokens, budget },
+          },
+        ],
         durationMs: Date.now() - startedAt,
       });
     }
@@ -348,6 +379,7 @@ export class CompilationEngine {
       userPrompt,
       context: [],
       outputSchema: LLM_COMPILATION_OUTPUT_SCHEMA,
+      maxTokens: input.docType.retrievalHints.summaryTokenBudget * 8,
     });
     return parseLLMCompilationOutput(result.content);
   }
@@ -403,7 +435,7 @@ export class CompilationEngine {
         lastCompiledAt: compiledAt,
         isFresh: true,
         agentReadingHints: documentType.retrievalHints.agentReadingHints,
-        summaryTokenLength: cheapTokenCount(parsed.summary),
+        summaryTokenLength: this.#tokenCounter(parsed.summary),
       },
     });
     parsed.sections.forEach((s, i) => {
@@ -585,11 +617,6 @@ function cheapHash(s: string): string {
   return `h_${(h >>> 0).toString(16)}_${s.length}`;
 }
 
-function cheapTokenCount(s: string): number {
-  // Proper tokenisation lands in WU 037. Whitespace approximation suffices.
-  return s.trim() ? s.trim().split(/\s+/).length : 0;
-}
-
 function renderMarkdownBody(o: LLMCompilationOutput): string {
   const lines: string[] = [];
   for (const s of [...o.sections].sort((a, b) => a.position - b.position)) {
@@ -599,11 +626,27 @@ function renderMarkdownBody(o: LLMCompilationOutput): string {
 }
 
 function buildSystemPrompt(docType: DocumentType): string {
-  return [
+  // Mirrors the prompt template at nuwiki.md §531. The summary is the
+  // single most important LLM call in NuWiki — every layer-1 record carries
+  // it — so the prompt is explicit about budget and retrieval shape.
+  const hints = docType.retrievalHints;
+  const lines: string[] = [
     `You are compiling a NuWiki article of type "${docType.type}" (${docType.description}).`,
-    `Return a JSON object conforming to the LLMCompilationOutput schema.`,
-    `Do not include prose outside the JSON.`,
-  ].join(' ');
+    `Return a JSON object conforming to the LLMCompilationOutput schema. Do not include prose outside the JSON.`,
+    `Summary constraints:`,
+    `- Maximum ${hints.summaryTokenBudget} tokens.`,
+    `- Cite no specific claims (citations live in the article body, not the summary).`,
+    `- Lead with the most distinguishing facts.`,
+    `- Include current state, recent changes, active strategies, and key relationships.`,
+    `- Avoid generic descriptions; be specific.`,
+  ];
+  if (hints.primaryQueryUseCases.length) {
+    lines.push(`- Match these primary query use cases: ${hints.primaryQueryUseCases.join('; ')}.`);
+  }
+  if (hints.sectionsPriorityForSummary.length) {
+    lines.push(`Sections to weight most: ${hints.sectionsPriorityForSummary.join(', ')}.`);
+  }
+  return lines.join('\n');
 }
 
 function buildUserPrompt(input: {
