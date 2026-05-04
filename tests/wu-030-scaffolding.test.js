@@ -138,7 +138,6 @@ describe('§4 Pending-WU stubs throw with WU pointers', () => {
 
   const cases = [
     { method: 'read', args: [{}], wu: /WU 041/ },
-    { method: 'followLinks', args: [{}], wu: /WU 040/ },
     { method: 'runIntegrityPass', args: [{}], wu: /WU 042/ },
     { method: 'suggestNewArticles', args: [{}], wu: /WU 043/ },
     { method: 'export', args: ['id', 'pdf'], wu: /post-v0\.1\.0/ },
@@ -150,8 +149,8 @@ describe('§4 Pending-WU stubs throw with WU pointers', () => {
     });
   }
 
-  test('compile / refresh / list / archive / delete / affectedDocuments are functions (implemented at WU 036)', () => {
-    for (const m of ['compile', 'refresh', 'list', 'archive', 'delete', 'affectedDocuments']) {
+  test('compile / refresh / list / archive / delete / affectedDocuments / followLinks are functions (implemented at WU 036+040)', () => {
+    for (const m of ['compile', 'refresh', 'list', 'archive', 'delete', 'affectedDocuments', 'followLinks']) {
       assert.equal(typeof wiki[m], 'function', `expected ${m} to be a function`);
     }
   });

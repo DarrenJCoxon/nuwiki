@@ -23,6 +23,8 @@ import type {
   UpsertRef,
 } from '@nusoft/nuvector';
 import type {
+  BacklinkTraversalRequest,
+  BacklinkTraversalResult,
   GraphNodeUpsert,
   NuVectorAdapter,
   NuVectorGraphAdapter,
@@ -83,6 +85,24 @@ class NuWikiNuVectorGraphAdapter implements NuVectorGraphAdapter {
       articleId,
       reason: 'cleanup',
     } as DeletionQuery);
+  }
+
+  async traverse(request: BacklinkTraversalRequest): Promise<BacklinkTraversalResult> {
+    const result = await this.#graph.traverse({
+      startArticleId: request.fromArticleId,
+      edgeTypes: request.linkTypes,
+      maxDepth: request.maxDepth ?? 1,
+    });
+    const visited = new Set<string>();
+    visited.add(request.fromArticleId);
+    for (const e of result.edges) {
+      visited.add(e.from);
+      visited.add(e.to);
+    }
+    return {
+      edges: result.edges.map((e) => ({ from: e.from, to: e.to, type: e.type, weight: e.weight })),
+      visitedArticleIds: [...visited],
+    };
   }
 }
 

@@ -244,7 +244,12 @@ describe('§1 First compile — adapter call sequence + atomic publish', () => {
     });
 
     assert.equal(result.status, 'published');
-    assert.equal(result.warnings.length, 0);
+    // WU 040 reports broken_backlink warnings for unseeded targets; the
+    // §1 fixture's outbound link to p_other isn't seeded, so a single
+    // broken_backlink warning is expected here. Other warning kinds
+    // remain forbidden.
+    const nonBrokenWarnings = result.warnings.filter((w) => w.kind !== 'broken_backlink');
+    assert.equal(nonBrokenWarnings.length, 0);
     assert.equal(result.articleId, 'pupil_profile:pupil:p_456');
     assert.match(result.versionId, /pupil_profile\/p_456\/v1/);
 

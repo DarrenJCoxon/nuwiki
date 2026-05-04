@@ -106,10 +106,29 @@ export interface SupersedeQuery {
   pattern: string;
 }
 
+export interface BacklinkTraversalRequest {
+  fromArticleId: string;
+  linkTypes?: string[];
+  maxDepth?: number;
+}
+
+export interface BacklinkTraversalEdge {
+  from: string;
+  to: string;
+  type: string;
+  weight?: number;
+}
+
+export interface BacklinkTraversalResult {
+  edges: BacklinkTraversalEdge[];
+  visitedArticleIds: string[];
+}
+
 export interface NuVectorGraphAdapter {
   upsertNodeWithEdges(spec: GraphNodeUpsert): Promise<void>;
   archiveNode(nodeId: string): Promise<void>;
   removeNode(nodeId: string): Promise<void>;
+  traverse(request: BacklinkTraversalRequest): Promise<BacklinkTraversalResult>;
 }
 
 export interface NuVectorAdapter {
