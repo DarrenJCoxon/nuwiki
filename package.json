@@ -26,6 +26,10 @@
       "types": "./dist/src/obsidian.d.ts",
       "default": "./dist/src/obsidian.js"
     },
+    "./postgres": {
+      "types": "./dist/src/postgres.d.ts",
+      "default": "./dist/src/postgres.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

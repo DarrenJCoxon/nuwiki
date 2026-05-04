@@ -10,7 +10,7 @@
  * etc. are imported, not redefined.
  */
 
-import type { SourceRef as NvSourceRef, SubjectRef as NvSubjectRef } from '@nusoft/nuvector';
+import type { SourceRef as NvSourceRef } from '@nusoft/nuvector';
 
 // ---------------------------------------------------------------------------
 // Primitive aliases
@@ -18,9 +18,17 @@ import type { SourceRef as NvSourceRef, SubjectRef as NvSubjectRef } from '@nuso
 
 export type ISODateString = string;
 
-// Re-export NuVector's reference types — NuWiki uses the same shapes.
+// SourceRef is shared verbatim with NuVector.
 export type SourceRef = NvSourceRef;
-export type SubjectRef = NvSubjectRef;
+
+// NuWiki's SubjectRef adds a human-readable label, matching NuFlow's shape.
+// (NuVector's SubjectRef is `{ kind, id }`; NuWiki and NuFlow extend it with
+// an optional `label` for rendering and audit.)
+export interface SubjectRef {
+  kind: string;
+  id: string;
+  label?: string;
+}
 
 export interface ActorRef {
   kind: string;
