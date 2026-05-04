@@ -1,0 +1,68 @@
+{
+  "name": "@nusoft/nuwiki",
+  "version": "0.0.1",
+  "description": "Private NuWiki — the compiled knowledge engine of NuOS. Maintains a living, cited, role-aware substrate of institutional understanding (LLM-compiled from authoritative sources) and publishes every article into NuVector's four-layer index.",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    },
+    "./templates": {
+      "types": "./dist/src/templates.d.ts",
+      "default": "./dist/src/templates.js"
+    },
+    "./agent-tools": {
+      "types": "./dist/src/agent-tools.d.ts",
+      "default": "./dist/src/agent-tools.js"
+    },
+    "./export": {
+      "types": "./dist/src/export.d.ts",
+      "default": "./dist/src/export.js"
+    },
+    "./obsidian": {
+      "types": "./dist/src/obsidian.d.ts",
+      "default": "./dist/src/obsidian.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/src/**/*.js",
+    "dist/src/**/*.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc",
+    "test": "npm run build && node --test tests/*.test.js",
+    "prepublishOnly": "npm run build",
+    "verify:nuwiki": "node scripts/verify-nuwiki-package.cjs"
+  },
+  "dependencies": {
+    "@nusoft/nuvector": "file:../nuvector/npm/packages/nuvector"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "keywords": [
+    "nuwiki",
+    "nusoft",
+    "knowledge",
+    "compiled-knowledge",
+    "llm-maintained",
+    "wiki",
+    "nuos"
+  ],
+  "author": "NuSoft",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "restricted",
+    "registry": "https://registry.npmjs.org/"
+  }
+}
