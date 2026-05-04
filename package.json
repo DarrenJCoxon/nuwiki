@@ -52,6 +52,7 @@
     "dist/src/**/*.js",
     "dist/src/**/*.d.ts",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
