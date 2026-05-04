@@ -66,6 +66,7 @@ export {
   LLMOutputParseError,
   LLM_COMPILATION_OUTPUT_SCHEMA,
   parseLLMCompilationOutput,
+  buildSectionEmbeddingText,
 } from './compilation.js';
 export {
   estimateTokenCount,
