@@ -196,8 +196,11 @@ export class CompilationEngine {
     // Step 3 — compute embeddings
     const llm = this.#cfg.llmAdapter;
     const summaryEmbedding = await llm.embed(parsed.summary);
+    const usePrefix = docType.retrievalHints.embedSectionsWithSummaryPrefix !== false;
     const sectionEmbeddings = await Promise.all(
-      parsed.sections.map((s) => llm.embed(this.#sectionEmbeddingText(s, parsed.summary))),
+      parsed.sections.map((s) =>
+        llm.embed(buildSectionEmbeddingText(parsed.summary, s, { withPrefix: usePrefix })),
+      ),
     );
     const citationEmbeddings = docType.precisionIndexable
       ? await Promise.all(parsed.citations.map((c) => llm.embed(c.claim)))
@@ -382,11 +385,6 @@ export class CompilationEngine {
       maxTokens: input.docType.retrievalHints.summaryTokenBudget * 8,
     });
     return parseLLMCompilationOutput(result.content);
-  }
-
-  #sectionEmbeddingText(section: LLMCompilationOutputSection, _summary: string): string {
-    // WU 038 will introduce the article-summary prefix invariant.
-    return `${section.heading}\n${section.text}`;
   }
 
   async #publishToNuVector(args: {
@@ -615,6 +613,30 @@ function cheapHash(s: string): string {
     h |= 0;
   }
   return `h_${(h >>> 0).toString(16)}_${s.length}`;
+}
+
+/**
+ * Build the text used for a section's embedding.
+ *
+ * The retrieval-architecture invariant from the contract: every section
+ * embedding includes the parent article summary as a prefix, so the
+ * section's vector representation carries article-level context. Without
+ * the prefix, layer-2 retrieval cannot discriminate between sections of
+ * the same shape across different articles.
+ *
+ * Set `withPrefix: false` only when a DocumentType's sections are
+ * genuinely self-contained (the contract default is `true`, and the
+ * `embedSectionsWithSummaryPrefix` flag on `RetrievalHints` is the
+ * per-DocumentType opt-out).
+ */
+export function buildSectionEmbeddingText(
+  summary: string,
+  section: { heading: string; text: string },
+  options: { withPrefix?: boolean } = {},
+): string {
+  const withPrefix = options.withPrefix !== false;
+  if (!withPrefix) return `${section.heading}\n${section.text}`;
+  return `[Article: ${summary}]\n${section.heading}: ${section.text}`;
 }
 
 function renderMarkdownBody(o: LLMCompilationOutput): string {
