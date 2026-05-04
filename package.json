@@ -42,6 +42,10 @@
       "types": "./dist/src/llm.d.ts",
       "default": "./dist/src/llm.js"
     },
+    "./database-source": {
+      "types": "./dist/src/database-source.d.ts",
+      "default": "./dist/src/database-source.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
