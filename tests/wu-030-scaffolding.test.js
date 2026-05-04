@@ -15,7 +15,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
 const main = await import('../dist/src/index.js');
-const templates = await import('../dist/src/templates.js');
+const packMod = await import('../dist/src/pack.js');
 const agentTools = await import('../dist/src/agent-tools.js');
 const exportMod = await import('../dist/src/export.js');
 const obsidian = await import('../dist/src/obsidian.js');
@@ -137,7 +137,6 @@ describe('§4 Pending-WU stubs throw with WU pointers', () => {
   });
 
   const cases = [
-    { method: 'suggestNewArticles', args: [{}], wu: /WU 043/ },
     { method: 'export', args: ['id', 'pdf'], wu: /post-v0\.1\.0/ },
   ];
 
@@ -147,8 +146,8 @@ describe('§4 Pending-WU stubs throw with WU pointers', () => {
     });
   }
 
-  test('compile / refresh / list / archive / delete / affectedDocuments / followLinks / read / runIntegrityPass are functions (implemented at WU 036+040+041+042)', () => {
-    for (const m of ['compile', 'refresh', 'list', 'archive', 'delete', 'affectedDocuments', 'followLinks', 'read', 'runIntegrityPass']) {
+  test('compile / refresh / list / archive / delete / affectedDocuments / followLinks / read / runIntegrityPass / suggestNewArticles are functions (implemented at WU 036+040+041+042+043)', () => {
+    for (const m of ['compile', 'refresh', 'list', 'archive', 'delete', 'affectedDocuments', 'followLinks', 'read', 'runIntegrityPass', 'suggestNewArticles']) {
       assert.equal(typeof wiki[m], 'function', `expected ${m} to be a function`);
     }
   });
@@ -159,8 +158,8 @@ describe('§4 Pending-WU stubs throw with WU pointers', () => {
 // ---------------------------------------------------------------------------
 
 describe('§5 Subpath stubs throw with helpful messages', () => {
-  test('NuWikiTemplates.education throws pointing at WU 044', () => {
-    assert.throws(() => templates.NuWikiTemplates.education, /WU 044/);
+  test('defineWikiPack is exported from pack subpath', () => {
+    assert.equal(typeof packMod.defineWikiPack, 'function');
   });
 
   test('NuWikiAgentTools.cite throws pointing at post-v0.1.0', () => {

@@ -10,9 +10,9 @@
       "types": "./dist/src/index.d.ts",
       "default": "./dist/src/index.js"
     },
-    "./templates": {
-      "types": "./dist/src/templates.d.ts",
-      "default": "./dist/src/templates.js"
+    "./pack": {
+      "types": "./dist/src/pack.d.ts",
+      "default": "./dist/src/pack.js"
     },
     "./agent-tools": {
       "types": "./dist/src/agent-tools.d.ts",

@@ -407,6 +407,7 @@ export interface ArticleSuggestion {
   rationale: string;
   evidenceRefs: SourceRef[];
   estimatedValue: 'high' | 'medium' | 'low';
+  suggestedAt: ISODateString;
 }
 
 // ---------------------------------------------------------------------------

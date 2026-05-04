@@ -31,7 +31,7 @@ const wiki = await NuWiki.open({
   memoryAdapter: nuvectorAdapter,   // for source retrieval and atomic four-layer publish (WU 033)
   llmAdapter: vertexAiAdapter,      // for compilation (WU 034)
   tenant: "school_bridge",
-  documentTypes: NuWikiTemplates.education,  // (WU 044)
+  documentTypes: myPack.documentTypes,  // (WU 044 — via WikiPack)
 });
 
 // Each of these methods throws NotImplementedError at v0.1.0;
@@ -52,7 +52,7 @@ await wiki.export(id, "pdf");         // post-v0.1.0
 ## Subpath imports
 
 ```ts
-import { NuWikiTemplates } from "@nusoft/nuwiki/templates";       // WU 044
+import { defineWikiPack } from "@nusoft/nuwiki/pack";            // WU 044
 import { NuWikiAgentTools } from "@nusoft/nuwiki/agent-tools";    // post-v0.1.0
 import { NuWikiExport } from "@nusoft/nuwiki/export";             // post-v0.1.0
 import { NuWikiObsidian } from "@nusoft/nuwiki/obsidian";         // post-v0.1.0

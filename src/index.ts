@@ -15,9 +15,9 @@
  * - WU 039: Citation validation
  * - WU 040: Backlink graph maintenance + followLinks
  * - WU 041: Role-aware redaction + read()
- * - WU 042: Integrity pass loop
- * - WU 043: Article-suggestion engine
- * - WU 044: Starter education DocumentTypes (subpath: `./templates`)
+ * - WU 042: Integrity pass loop ✅
+ * - WU 043: Article-suggestion engine (this WU)
+ * - WU 044: WikiPack interface + domain-neutral core (packs contribute DocumentTypes)
  * - WU 045: Conformance test suite
  * - WU 046: Documentation
  * - WU 047: v0.1.0 publish
@@ -26,6 +26,7 @@
 import { CompilationEngine } from './compilation.js';
 import { redactArticle } from './redaction.js';
 import { runIntegrityPass } from './integrity.js';
+import { suggestNewArticles } from './suggestions.js';
 import { NotImplementedError } from './errors.js';
 import type {
   ArchiveRequest,
@@ -98,6 +99,15 @@ export {
   applyAutoRemediations,
 } from './integrity.js';
 export type { IntegrityPassAdapters } from './integrity.js';
+export {
+  suggestNewArticles,
+  LLM_SUGGESTION_OUTPUT_SCHEMA,
+  parseLLMSuggestionOutput,
+  LLMSuggestionParseError,
+} from './suggestions.js';
+export type { SuggestionEngineConfig } from './suggestions.js';
+export { defineWikiPack } from './pack.js';
+export type { WikiPack } from './pack.js';
 
 export interface NuWikiConfig {
   metadata: MetadataAdapter;
@@ -317,8 +327,17 @@ export class NuWiki {
     );
   }
 
-  async suggestNewArticles(_scope: SuggestionScope): Promise<ArticleSuggestion[]> {
-    throw new NotImplementedError('NuWiki.suggestNewArticles', 'WU 043 (article-suggestion engine)');
+  async suggestNewArticles(scope: SuggestionScope): Promise<ArticleSuggestion[]> {
+    return suggestNewArticles(
+      {
+        metadata: this.#metadata,
+        memoryAdapter: this.#memoryAdapter,
+        llmAdapter: this.#llmAdapter,
+        tenant: this.#tenant,
+        getDocumentType: (type) => this.#documentTypes.get(type),
+      },
+      scope,
+    );
   }
 
   async list(filters: ListFilters): Promise<NuWikiArticle[]> {
