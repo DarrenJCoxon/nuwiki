@@ -46,6 +46,8 @@ describe('§1 VertexAILLMAdapter', () => {
     const m = mockHttp([{ ok: true, status: 200, json: { candidates: [{ content: { parts: [{ text: 'hi' }] }, finishReason: 'STOP' }] } }]);
     const a = new VertexAILLMAdapter({
       projectId: 'my-project',
+      generationModel: 'gemini-flash-3',
+      embeddingModel: 'text-embedding-005',
       getAuthToken: async () => 'token',
       http: m.http,
     });
@@ -67,7 +69,11 @@ describe('§1 VertexAILLMAdapter', () => {
       },
     }]);
     const a = new VertexAILLMAdapter({
-      projectId: 'p', getAuthToken: async () => 't', http: m.http,
+      projectId: 'p',
+      generationModel: 'gemini-flash-3',
+      embeddingModel: 'text-embedding-005',
+      getAuthToken: async () => 't',
+      http: m.http,
     });
     const result = await a.generate({
       systemPrompt: 'System',
@@ -78,7 +84,8 @@ describe('§1 VertexAILLMAdapter', () => {
     });
     assert.equal(result.content, 'Generated text');
     assert.equal(result.finishReason, 'stop');
-    assert.equal(result.model, 'gemini-2.5-pro');
+    assert.equal(result.model, 'gemini-flash-3');
+    assert.match(m.calls[0].url, /gemini-flash-3:generateContent$/);
     assert.equal(result.usage.promptTokens, 10);
     assert.equal(result.usage.completionTokens, 5);
 
@@ -91,16 +98,20 @@ describe('§1 VertexAILLMAdapter', () => {
     assert.equal(body.generationConfig.maxOutputTokens, 256);
   });
 
-  test('embed posts to text-embedding-004 by default and returns Float32Array', async () => {
+  test('embed posts to the configured embedding model and returns Float32Array', async () => {
     const m = mockHttp([{
       ok: true, status: 200,
       json: { predictions: [{ embeddings: { values: [0.1, 0.2, 0.3, 0.4] } }] },
     }]);
     const a = new VertexAILLMAdapter({
-      projectId: 'p', getAuthToken: async () => 't', http: m.http,
+      projectId: 'p',
+      generationModel: 'gemini-flash-lite-3',
+      embeddingModel: 'text-embedding-005',
+      getAuthToken: async () => 't',
+      http: m.http,
     });
     const vec = await a.embed('hello');
-    assert.match(m.calls[0].url, /text-embedding-004:predict$/);
+    assert.match(m.calls[0].url, /text-embedding-005:predict$/);
     assert.ok(vec instanceof Float32Array);
     assert.equal(vec.length, 4);
     assert.equal(vec[0], Math.fround(0.1));
@@ -112,7 +123,13 @@ describe('§1 VertexAILLMAdapter', () => {
       { ok: true, status: 200, json: { candidates: [{ content: { parts: [{ text: 'b' }] }, finishReason: 'MAX_TOKENS' }] } },
       { ok: true, status: 200, json: { candidates: [{ content: { parts: [{ text: 'c' }] }, finishReason: 'SAFETY' }] } },
     ]);
-    const a = new VertexAILLMAdapter({ projectId: 'p', getAuthToken: async () => 't', http: m.http });
+    const a = new VertexAILLMAdapter({
+      projectId: 'p',
+      generationModel: 'gemini-flash-3',
+      embeddingModel: 'text-embedding-005',
+      getAuthToken: async () => 't',
+      http: m.http,
+    });
     const r1 = await a.generate({ systemPrompt: '', userPrompt: 'a', context: [] });
     const r2 = await a.generate({ systemPrompt: '', userPrompt: 'b', context: [] });
     const r3 = await a.generate({ systemPrompt: '', userPrompt: 'c', context: [] });
@@ -129,6 +146,8 @@ describe('§1 VertexAILLMAdapter', () => {
     ]);
     const a = new VertexAILLMAdapter({
       projectId: 'p',
+      generationModel: 'gemini-flash-3',
+      embeddingModel: 'text-embedding-005',
       getAuthToken: async () => { count++; return 'token_' + count; },
       http: m.http,
     });
@@ -139,7 +158,13 @@ describe('§1 VertexAILLMAdapter', () => {
 
   test('non-ok response throws', async () => {
     const m = mockHttp([{ ok: false, status: 500, statusText: 'Internal' }]);
-    const a = new VertexAILLMAdapter({ projectId: 'p', getAuthToken: async () => 't', http: m.http });
+    const a = new VertexAILLMAdapter({
+      projectId: 'p',
+      generationModel: 'gemini-flash-3',
+      embeddingModel: 'text-embedding-005',
+      getAuthToken: async () => 't',
+      http: m.http,
+    });
     await assert.rejects(() => a.generate({ systemPrompt: '', userPrompt: 'x', context: [] }), /500/);
   });
 });
@@ -315,7 +340,12 @@ describe('§3 createStubLLMAdapter', () => {
 describe('§4 LLMAdapter conformance', () => {
   test('all three implementations expose generate + embed', () => {
     const adapters = [
-      new VertexAILLMAdapter({ projectId: 'p', getAuthToken: async () => 't' }),
+      new VertexAILLMAdapter({
+        projectId: 'p',
+        generationModel: 'gemini-flash-3',
+        embeddingModel: 'text-embedding-005',
+        getAuthToken: async () => 't',
+      }),
       new OpenAICompatibleLLMAdapter({ baseUrl: 'http://x', model: 'm' }),
       createStubLLMAdapter([]),
     ];

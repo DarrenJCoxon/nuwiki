@@ -6,8 +6,9 @@
  * `nuos/docs/LOCAL-MODELS-FOR-SENSIGHT.md`:
  *
  * - `VertexAILLMAdapter` — Tier 2 cloud / frontier reasoning. UK-resident
- *   region by default (`europe-west2`). Vertex `text-embedding-004` for
- *   embeddings.
+ *   region by default (`europe-west2`). Model-agnostic: the consumer names
+ *   the current Gemini generation (Flash 3 / Flash Lite 3 / Pro 3 / etc.)
+ *   and the current Vertex embedding model at deployment time.
  * - `OpenAICompatibleLLMAdapter` — Tier 1 local, or anything else exposing
  *   the OpenAI completion shape. Works against Ollama, vLLM, OpenRouter,
  *   any compatible endpoint. Tier 0 (Phi-3 on a laptop CPU) is also reachable
@@ -38,10 +39,21 @@ export interface VertexAIConfig {
   projectId: string;
   /** Vertex region. Defaults to `europe-west2` (London) for UK data residency. */
   region?: string;
-  /** Generation model. Defaults to `gemini-2.5-pro`. */
-  generationModel?: string;
-  /** Embedding model. Defaults to `text-embedding-004`. */
-  embeddingModel?: string;
+  /**
+   * Generation model — required. The Vertex / Gemini lineup turns over every
+   * few months; the adapter is deliberately model-agnostic so it does not rot.
+   * The consumer names the current generation at deployment time
+   * (e.g. `gemini-flash-3`, `gemini-flash-lite-3`, `gemini-pro-3`, or whatever
+   * the live model IDs are when this is wired up).
+   */
+  generationModel: string;
+  /**
+   * Embedding model — required. Same reasoning as `generationModel`: the
+   * embedding lineup also evolves. Pick whatever Vertex currently exposes in
+   * your region (e.g. `text-embedding-005`, `text-embedding-large-exp-03-07`,
+   * etc.).
+   */
+  embeddingModel: string;
   /** Returns a fresh OAuth bearer token. Called per request. */
   getAuthToken: () => Promise<string>;
   /** HTTP client. Defaults to `globalThis.fetch`. */
@@ -70,7 +82,7 @@ export class VertexAILLMAdapter implements LLMAdapter {
   }
 
   async generate(request: LLMGenerationRequest): Promise<LLMGenerationResult> {
-    const model = this.#config.generationModel ?? 'gemini-2.5-pro';
+    const model = this.#config.generationModel;
     const url = `${this.#endpoint}/projects/${this.#config.projectId}/locations/${this.#region}/publishers/google/models/${model}:generateContent`;
     const contents = [
       ...request.context.map((c) => ({
@@ -110,7 +122,7 @@ export class VertexAILLMAdapter implements LLMAdapter {
   }
 
   async embed(text: string): Promise<Float32Array> {
-    const model = this.#config.embeddingModel ?? 'text-embedding-004';
+    const model = this.#config.embeddingModel;
     const url = `${this.#endpoint}/projects/${this.#config.projectId}/locations/${this.#region}/publishers/google/models/${model}:predict`;
     const body = { instances: [{ content: text }] };
     const res = await this.#http(url, {
