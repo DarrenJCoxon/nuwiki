@@ -444,6 +444,40 @@ export interface ExportRef {
 }
 
 // ---------------------------------------------------------------------------
+// LLM compilation output (the structured shape the LLM is asked to return)
+// ---------------------------------------------------------------------------
+
+export interface LLMCompilationOutputSection {
+  key: string;
+  heading: string;
+  text: string;
+  citationIds: string[];
+  position: number;
+}
+
+export interface LLMCompilationOutputCitation {
+  id: string;
+  claim: string;
+  source: SourceRef;
+  confidence: number;
+  position: { start: number; end: number };
+}
+
+export interface LLMCompilationOutputLink {
+  toArticleId: string;
+  linkType: LinkType;
+  context: string;
+  position: { start: number; end: number };
+}
+
+export interface LLMCompilationOutput {
+  summary: string;
+  sections: LLMCompilationOutputSection[];
+  citations: LLMCompilationOutputCitation[];
+  outboundLinks: LLMCompilationOutputLink[];
+}
+
+// ---------------------------------------------------------------------------
 // Knowledge ref (consumed by NuFlow)
 // ---------------------------------------------------------------------------
 
@@ -452,6 +486,22 @@ export interface KnowledgeRef {
   subject: SubjectRef;
   refreshTriggered: boolean;
   documentId?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Workflow commit envelope (consumed by affectedDocuments)
+// ---------------------------------------------------------------------------
+
+export interface WorkflowCommitEnvelope {
+  commitRef: string;
+  recordType: string;
+  recordId: string;
+  committedAt: ISODateString;
+}
+
+export interface WorkflowIntentEnvelope {
+  type: string;
+  subjects: SubjectRef[];
 }
 
 // ---------------------------------------------------------------------------
