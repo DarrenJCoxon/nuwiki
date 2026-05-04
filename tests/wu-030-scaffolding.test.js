@@ -121,10 +121,13 @@ describe('§3 DocumentType registry', () => {
 });
 
 // ---------------------------------------------------------------------------
-// § 4  Every runtime method throws NotImplementedError pointing at its WU
+// § 4  Methods still pending implementation throw NotImplementedError
+//
+// WU 036 implemented compile / refresh / list / archive / delete /
+// affectedDocuments. The remaining stubs assert the post-WU-036 state.
 // ---------------------------------------------------------------------------
 
-describe('§4 Stub methods throw with WU pointers', () => {
+describe('§4 Pending-WU stubs throw with WU pointers', () => {
   let wiki;
   test('setup', async () => {
     wiki = await NuWiki.open({
@@ -134,16 +137,10 @@ describe('§4 Stub methods throw with WU pointers', () => {
   });
 
   const cases = [
-    { method: 'compile', args: [{}], wu: /WU 036/ },
     { method: 'read', args: [{}], wu: /WU 041/ },
     { method: 'followLinks', args: [{}], wu: /WU 040/ },
-    { method: 'refresh', args: [{}], wu: /WU 036/ },
-    { method: 'affectedDocuments', args: [{}, {}], wu: /WU 036|WU 040/ },
     { method: 'runIntegrityPass', args: [{}], wu: /WU 042/ },
     { method: 'suggestNewArticles', args: [{}], wu: /WU 043/ },
-    { method: 'list', args: [{}], wu: /WU 031/ },
-    { method: 'archive', args: [{}], wu: /WU 036/ },
-    { method: 'delete', args: [{}], wu: /WU 036/ },
     { method: 'export', args: ['id', 'pdf'], wu: /post-v0\.1\.0/ },
   ];
 
@@ -152,6 +149,12 @@ describe('§4 Stub methods throw with WU pointers', () => {
       await assert.rejects(() => wiki[c.method](...c.args), c.wu);
     });
   }
+
+  test('compile / refresh / list / archive / delete / affectedDocuments are functions (implemented at WU 036)', () => {
+    for (const m of ['compile', 'refresh', 'list', 'archive', 'delete', 'affectedDocuments']) {
+      assert.equal(typeof wiki[m], 'function', `expected ${m} to be a function`);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

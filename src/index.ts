@@ -1,18 +1,20 @@
 /**
  * `@nusoft/nuwiki` — the compiled knowledge engine of NuOS.
  *
- * v0.1.0 status: this package is a **scaffolding skeleton** (WU 030). The
- * type surface is complete; the runtime is stubbed. Each method throws a
- * `NotImplementedError` pointing at the WU that will implement it.
+ * v0.1.0 status (post-WU-036): the compilation engine is wired. The runtime
+ * methods that depend on the engine (compile, refresh, list, archive,
+ * delete, affectedDocuments) are implemented. Methods that depend on
+ * later WUs still throw `NotImplementedError` pointing at the WU that
+ * will implement them.
  *
  * Implementation order:
- * - WU 031–035: Adapter reference implementations
- * - WU 036: Compilation engine (the central runtime piece)
+ * - WU 031–035: Adapter reference implementations ✅
+ * - WU 036: Compilation engine ✅ (this WU)
  * - WU 037: Summary compilation with token budget enforcement
  * - WU 038: Section embedding with article-summary prefix
  * - WU 039: Citation validation
- * - WU 040: Backlink graph maintenance
- * - WU 041: Role-aware redaction
+ * - WU 040: Backlink graph maintenance + followLinks
+ * - WU 041: Role-aware redaction + read()
  * - WU 042: Integrity pass loop
  * - WU 043: Article-suggestion engine
  * - WU 044: Starter education DocumentTypes (subpath: `./templates`)
@@ -21,6 +23,7 @@
  * - WU 047: v0.1.0 publish
  */
 
+import { CompilationEngine } from './compilation.js';
 import { NotImplementedError } from './errors.js';
 import type {
   ArchiveRequest,
@@ -44,6 +47,8 @@ import type {
   RenderedArticle,
   SubjectRef,
   SuggestionScope,
+  WorkflowCommitEnvelope,
+  WorkflowIntentEnvelope,
 } from './types.js';
 import type {
   DatabaseSourceAdapter,
@@ -56,6 +61,12 @@ import type {
 export * from './types.js';
 export * from './adapters.js';
 export { NotImplementedError } from './errors.js';
+export {
+  CompilationEngine,
+  LLMOutputParseError,
+  LLM_COMPILATION_OUTPUT_SCHEMA,
+  parseLLMCompilationOutput,
+} from './compilation.js';
 
 export interface NuWikiConfig {
   metadata: MetadataAdapter;
@@ -65,28 +76,48 @@ export interface NuWikiConfig {
   databaseSource?: DatabaseSourceAdapter;
   tenant: string;
   documentTypes?: DocumentType[];
+  /** Test-only injection points. Production callers omit. */
+  idFactory?: () => string;
+  now?: () => string;
 }
 
 /**
  * The main entry point of `@nusoft/nuwiki`.
- *
- * v0.1.0 status: every method is a stub. The runtime implementation lands
- * in WU 036 onwards. This class exists at WU 030 to fix the public surface
- * and let downstream WUs implement against it.
  */
 export class NuWiki {
   readonly #tenant: string;
   readonly #documentTypes: Map<string, DocumentType>;
+  readonly #metadata: MetadataAdapter;
+  readonly #bodies: ObjectStorageAdapter;
+  readonly #memoryAdapter: NuVectorAdapter;
+  readonly #llmAdapter: LLMAdapter;
+  readonly #databaseSource?: DatabaseSourceAdapter;
+  readonly #engine: CompilationEngine;
 
-  private constructor(tenant: string, documentTypes: DocumentType[]) {
-    this.#tenant = tenant;
-    this.#documentTypes = new Map(documentTypes.map((d) => [d.type, d]));
+  private constructor(config: NuWikiConfig) {
+    this.#tenant = config.tenant;
+    this.#documentTypes = new Map((config.documentTypes ?? []).map((d) => [d.type, d]));
+    this.#metadata = config.metadata;
+    this.#bodies = config.bodies;
+    this.#memoryAdapter = config.memoryAdapter;
+    this.#llmAdapter = config.llmAdapter;
+    this.#databaseSource = config.databaseSource;
+    this.#engine = new CompilationEngine({
+      metadata: config.metadata,
+      bodies: config.bodies,
+      memoryAdapter: config.memoryAdapter,
+      llmAdapter: config.llmAdapter,
+      databaseSource: config.databaseSource,
+      tenant: config.tenant,
+      getDocumentType: (type) => this.#documentTypes.get(type),
+      idFactory: config.idFactory,
+      now: config.now,
+    });
   }
 
   static async open(config: NuWikiConfig): Promise<NuWiki> {
-    const tenant = config.tenant;
-    if (!tenant) throw new Error('NuWiki.open() requires a tenant');
-    return new NuWiki(tenant, config.documentTypes ?? []);
+    if (!config.tenant) throw new Error('NuWiki.open() requires a tenant');
+    return new NuWiki(config);
   }
 
   registerDocumentType(definition: DocumentType): void {
@@ -100,8 +131,8 @@ export class NuWiki {
     return [...this.#documentTypes.values()];
   }
 
-  async compile(_request: CompileRequest): Promise<CompilationResult> {
-    throw new NotImplementedError('NuWiki.compile', 'WU 036 (compilation engine)');
+  async compile(request: CompileRequest): Promise<CompilationResult> {
+    return this.#engine.compile(request);
   }
 
   async read(_request: ReadRequest): Promise<RenderedArticle> {
@@ -112,18 +143,42 @@ export class NuWiki {
     throw new NotImplementedError('NuWiki.followLinks', 'WU 040 (backlink graph maintenance)');
   }
 
-  async refresh(_ref: RefreshRef): Promise<RefreshResult> {
-    throw new NotImplementedError('NuWiki.refresh', 'WU 036 (compilation engine)');
+  async refresh(ref: RefreshRef): Promise<RefreshResult> {
+    const articleId = `${ref.documentType}:${ref.subject.kind}:${ref.subject.id}`;
+    const result = await this.#engine.compile({
+      documentType: ref.documentType,
+      subject: ref.subject,
+      trigger: ref.trigger ?? { kind: 'scheduled_refresh' },
+    });
+    return {
+      articleId,
+      refreshTriggered: result.status === 'published',
+      versionId: result.versionId || undefined,
+      reason: result.warnings[0]?.message,
+    };
   }
 
   async affectedDocuments(
-    _commit: { commitRef: string; recordType: string; recordId: string; committedAt: string },
-    _intent: { type: string; subjects: SubjectRef[] }
+    _commit: WorkflowCommitEnvelope,
+    intent: WorkflowIntentEnvelope,
   ): Promise<KnowledgeRef[]> {
-    throw new NotImplementedError(
-      'NuWiki.affectedDocuments',
-      'WU 036 (compilation engine) and WU 040 (backlink graph)'
-    );
+    const refs: KnowledgeRef[] = [];
+    for (const docType of this.#documentTypes.values()) {
+      const triggersMatch = docType.refreshTriggers.some(
+        (t) => t.kind === 'workflow_commit' && (!t.intentType || t.intentType === intent.type),
+      );
+      if (!triggersMatch) continue;
+      for (const subject of intent.subjects) {
+        if (subject.kind !== docType.subjectKind && docType.subjectKind !== 'institution') continue;
+        refs.push({
+          documentType: docType.type,
+          subject,
+          refreshTriggered: false,
+          documentId: `${docType.type}:${subject.kind}:${subject.id}`,
+        });
+      }
+    }
+    return refs;
   }
 
   async runIntegrityPass(_request: IntegrityPassRequest): Promise<IntegrityPassResult> {
@@ -134,16 +189,81 @@ export class NuWiki {
     throw new NotImplementedError('NuWiki.suggestNewArticles', 'WU 043 (article-suggestion engine)');
   }
 
-  async list(_filters: ListFilters): Promise<NuWikiArticle[]> {
-    throw new NotImplementedError('NuWiki.list', 'WU 031 (MetadataAdapter Postgres reference impl)');
+  async list(filters: ListFilters): Promise<NuWikiArticle[]> {
+    return this.#metadata.listArticles({
+      tenant: filters.tenant ?? this.#tenant,
+      documentType: filters.documentType,
+      status: filters.status,
+      limit: filters.limit,
+    });
   }
 
-  async archive(_request: ArchiveRequest): Promise<void> {
-    throw new NotImplementedError('NuWiki.archive', 'WU 036 (compilation engine)');
+  async archive(request: ArchiveRequest): Promise<void> {
+    const articleId = `${request.documentType}:${request.subject.kind}:${request.subject.id}`;
+    const existing = await this.#metadata.getArticle(articleId);
+    if (!existing) return;
+    await this.#memoryAdapter.graph.archiveNode(articleId);
+    await this.#metadata.upsertArticle({
+      id: articleId,
+      tenant: this.#tenant,
+      documentType: request.documentType,
+      subject: request.subject,
+      path: existing.path,
+      currentVersion: existing.currentVersion,
+      status: 'archived',
+      metadata: { ...existing.metadata, archiveReason: request.reason },
+      createdAt: existing.createdAt,
+      updatedAt: new Date().toISOString(),
+    });
   }
 
-  async delete(_query: DeletionQuery): Promise<DeletionResult> {
-    throw new NotImplementedError('NuWiki.delete', 'WU 036 (compilation engine)');
+  async delete(query: DeletionQuery): Promise<DeletionResult> {
+    const affected: string[] = [];
+    let vectorRecordsRemoved = 0;
+
+    if (query.ids?.length) {
+      affected.push(...query.ids);
+    } else if (query.subject) {
+      const list = await this.#metadata.listArticles({ tenant: this.#tenant });
+      for (const a of list) {
+        if (
+          a.subject.kind === query.subject.kind &&
+          a.subject.id === query.subject.id &&
+          (!query.documentType || a.documentType === query.documentType)
+        ) {
+          affected.push(a.id);
+        }
+      }
+    } else if (query.documentType) {
+      const list = await this.#metadata.listArticles({ tenant: this.#tenant, documentType: query.documentType });
+      affected.push(...list.map((a) => a.id));
+    }
+
+    for (const articleId of affected) {
+      const existing = await this.#metadata.getArticle(articleId);
+      if (!existing) continue;
+      const versions = await this.#metadata.listVersions(articleId);
+      for (const v of versions) {
+        try {
+          await this.#bodies.delete(v.bodyRef);
+        } catch {
+          // best-effort; missing bodies are non-fatal at delete time
+        }
+      }
+      const result = await this.#memoryAdapter.delete({
+        articleId,
+        tenant: this.#tenant,
+        reason: query.reason ?? 'gdpr_erasure',
+      });
+      vectorRecordsRemoved += result.deletedCount;
+      await this.#memoryAdapter.graph.removeNode(articleId);
+    }
+
+    return {
+      deletedCount: affected.length,
+      affectedArticles: affected,
+      vectorRecordsRemoved,
+    };
   }
 
   async export(_articleId: string, _format: ExportFormat): Promise<ExportRef> {
