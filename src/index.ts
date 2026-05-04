@@ -24,6 +24,7 @@
  */
 
 import { CompilationEngine } from './compilation.js';
+import { redactArticle } from './redaction.js';
 import { NotImplementedError } from './errors.js';
 import type {
   ArchiveRequest,
@@ -87,6 +88,8 @@ export {
   BrokenLinkChecker,
 } from './backlinks.js';
 export type { OutboundLinkRef, BrokenLinkReport } from './backlinks.js';
+export { redactArticle } from './redaction.js';
+export type { RedactArticleInput, RedactArticleOutput } from './redaction.js';
 
 export interface NuWikiConfig {
   metadata: MetadataAdapter;
@@ -163,8 +166,52 @@ export class NuWiki {
     return this.#engine.compile(request);
   }
 
-  async read(_request: ReadRequest): Promise<RenderedArticle> {
-    throw new NotImplementedError('NuWiki.read', 'WU 041 (role-aware redaction)');
+  async read(request: ReadRequest): Promise<RenderedArticle> {
+    const articleId = `${request.documentType}:${request.subject.kind}:${request.subject.id}`;
+    const article = await this.#metadata.getArticle(articleId);
+    if (!article) {
+      throw new Error(`NuWiki.read: article not found for ${articleId}`);
+    }
+    const docType = this.#documentTypes.get(article.documentType);
+    if (!docType) {
+      throw new Error(`NuWiki.read: documentType not registered: ${article.documentType}`);
+    }
+    const version = request.version ?? article.currentVersion;
+    const versionId = `${article.documentType}/${article.subject.id}/${version}`;
+    const structuredKey = `nuwiki/${this.#tenant}/${articleId}/${versionId}.json`;
+    const structuredJson = await this.#bodies.get({ key: structuredKey });
+    const parsed = JSON.parse(structuredJson);
+
+    // Hydrate link targets so RenderedLink carries subject + documentType.
+    const linkTargets: Record<string, { subject: SubjectRef; documentType: string }> = {};
+    for (const l of parsed.outboundLinks ?? []) {
+      const target = await this.#metadata.getArticle(l.toArticleId);
+      if (target) {
+        linkTargets[l.toArticleId] = { subject: target.subject, documentType: target.documentType };
+      }
+    }
+
+    const redacted = redactArticle({
+      documentType: docType,
+      parsed,
+      viewerRole: request.viewerRole,
+      linkTargets,
+    });
+
+    return {
+      articleId,
+      documentType: article.documentType,
+      subject: article.subject,
+      version,
+      freshness: article.freshness,
+      body: redacted.body,
+      citations: redacted.citations,
+      outboundLinks: redacted.outboundLinks,
+      warnings: redacted.warnings,
+      viewerRole: request.viewerRole,
+      renderedAt: new Date().toISOString(),
+      agentMetadata: docType.retrievalHints.agentReadingHints,
+    };
   }
 
   async followLinks(request: FollowLinksRequest): Promise<RenderedArticle[]> {
@@ -179,23 +226,31 @@ export class NuWiki {
     for (const id of linkedIds) {
       const article = await this.#metadata.getArticle(id);
       if (!article) continue;
-      // Minimal RenderedArticle shape until WU 041 ships the full renderer.
-      // The body is left empty here; agents reading via NuVector layer 1
-      // already have the article summary. WU 041 will assemble the full
-      // role-redacted body from object storage.
-      out.push({
-        articleId: article.id,
-        documentType: article.documentType,
-        subject: article.subject,
-        version: article.currentVersion,
-        freshness: article.freshness,
-        body: '',
-        citations: [],
-        outboundLinks: [],
-        warnings: [],
-        viewerRole: request.viewerRole,
-        renderedAt,
-      });
+      try {
+        const rendered = await this.read({
+          documentType: article.documentType,
+          subject: article.subject,
+          viewerRole: request.viewerRole,
+        });
+        out.push(rendered);
+      } catch {
+        // Article exists in metadata but storage / docType missing — fall
+        // back to a minimal RenderedArticle so the traversal still
+        // surfaces the link. Integrity pass (WU 042) flags the gap.
+        out.push({
+          articleId: article.id,
+          documentType: article.documentType,
+          subject: article.subject,
+          version: article.currentVersion,
+          freshness: article.freshness,
+          body: '',
+          citations: [],
+          outboundLinks: [],
+          warnings: [{ kind: 'missing_evidence', message: 'Article body not available for rendering', details: { articleId: article.id } }],
+          viewerRole: request.viewerRole,
+          renderedAt,
+        });
+      }
     }
     return out;
   }

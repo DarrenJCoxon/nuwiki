@@ -226,13 +226,21 @@ export class CompilationEngine {
       ? await Promise.all(parsed.citations.map((c) => llm.embed(c.claim)))
       : [];
 
-    // Step 4 — write body to object storage
+    // Step 4 — write body + structured JSON to object storage.
+    // The .md is the human/debug-facing form; the .json carries the full
+    // LLMCompilationOutput so wiki.read() (WU 041) can re-render with
+    // role-aware redaction at section level.
     const newVersionId = `${request.documentType}/${request.subject.id}/${nextVersion(predecessorVersion)}`;
     const bodyKey = `nuwiki/${this.#cfg.tenant}/${articleId}/${newVersionId}.md`;
+    const structuredKey = `nuwiki/${this.#cfg.tenant}/${articleId}/${newVersionId}.json`;
     const body = renderMarkdownBody(parsed);
     let bodyRef;
     try {
       bodyRef = await this.#cfg.bodies.put({ key: bodyKey, contentType: 'text/markdown' }, body);
+      await this.#cfg.bodies.put(
+        { key: structuredKey, contentType: 'application/json' },
+        JSON.stringify(parsed),
+      );
     } catch (err) {
       return blockedResult({
         articleId,

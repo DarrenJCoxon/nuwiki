@@ -262,9 +262,10 @@ describe('§1 First compile — adapter call sequence + atomic publish', () => {
     assert.equal(llmAdapter.calls[0].kind, 'generate');
     assert.equal(llmAdapter.calls[1].kind, 'embed');
 
-    // body persisted
-    assert.equal(bodies.calls.put.length, 1);
-    assert.match(bodies.calls.put[0].ref.key, /^nuwiki\/school_bridge\/pupil_profile:pupil:p_456\//);
+    // body persisted (WU 041 adds a .json structured-form write alongside .md)
+    assert.equal(bodies.calls.put.length, 2);
+    assert.match(bodies.calls.put[0].ref.key, /^nuwiki\/school_bridge\/pupil_profile:pupil:p_456\/.+\.md$/);
+    assert.match(bodies.calls.put[1].ref.key, /^nuwiki\/school_bridge\/pupil_profile:pupil:p_456\/.+\.json$/);
 
     // metadata writes: at least 1 article upsert (compiling) → 1 article upsert (published) + 1 version upsert
     assert.equal(metadata.calls.upsertVersion.length, 1);
