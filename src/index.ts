@@ -25,6 +25,7 @@
 
 import { CompilationEngine } from './compilation.js';
 import { redactArticle } from './redaction.js';
+import { runIntegrityPass } from './integrity.js';
 import { NotImplementedError } from './errors.js';
 import type {
   ArchiveRequest,
@@ -90,6 +91,13 @@ export {
 export type { OutboundLinkRef, BrokenLinkReport } from './backlinks.js';
 export { redactArticle } from './redaction.js';
 export type { RedactArticleInput, RedactArticleOutput } from './redaction.js';
+export {
+  runIntegrityPass,
+  IntegrityCheckers,
+  applyAutoRemediation,
+  applyAutoRemediations,
+} from './integrity.js';
+export type { IntegrityPassAdapters } from './integrity.js';
 
 export interface NuWikiConfig {
   metadata: MetadataAdapter;
@@ -293,8 +301,20 @@ export class NuWiki {
     return refs;
   }
 
-  async runIntegrityPass(_request: IntegrityPassRequest): Promise<IntegrityPassResult> {
-    throw new NotImplementedError('NuWiki.runIntegrityPass', 'WU 042 (integrity pass loop)');
+  async runIntegrityPass(request: IntegrityPassRequest): Promise<IntegrityPassResult> {
+    return runIntegrityPass(
+      {
+        metadata: this.#metadata,
+        bodies: this.#bodies,
+        memoryAdapter: this.#memoryAdapter,
+        llmAdapter: this.#llmAdapter,
+        databaseSource: this.#databaseSource,
+        tenant: this.#tenant,
+        getDocumentType: (type) => this.#documentTypes.get(type),
+        compile: (req) => this.#engine.compile(req),
+      },
+      request,
+    );
   }
 
   async suggestNewArticles(_scope: SuggestionScope): Promise<ArticleSuggestion[]> {
