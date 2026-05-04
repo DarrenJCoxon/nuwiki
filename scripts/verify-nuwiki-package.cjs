@@ -20,13 +20,15 @@ const forbiddenPackedPrefixes = [
   'tests/',
 ];
 
+// NuWiki is by design an integration package — its storage adapters must talk
+// to SharePoint, Google Drive, and Supabase via HTTP. `fetch(` and `WebSocket`
+// are therefore not forbidden here (unlike NuFlow's runtime). The remaining
+// terms would indicate either heritage leakage or genuinely unsafe patterns.
 const forbiddenRuntimeTerms = [
   'child_process',
   'exec(',
   'execSync',
   'spawn(',
-  'fetch(',
-  'WebSocket',
   '@modelcontextprotocol',
   'odd-flow',
   'claude',

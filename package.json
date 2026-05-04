@@ -30,6 +30,10 @@
       "types": "./dist/src/postgres.d.ts",
       "default": "./dist/src/postgres.js"
     },
+    "./storage": {
+      "types": "./dist/src/storage.d.ts",
+      "default": "./dist/src/storage.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
