@@ -34,6 +34,10 @@
       "types": "./dist/src/storage.d.ts",
       "default": "./dist/src/storage.js"
     },
+    "./nuvector": {
+      "types": "./dist/src/nuvector-adapter.d.ts",
+      "default": "./dist/src/nuvector-adapter.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
