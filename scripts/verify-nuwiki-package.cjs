@@ -44,8 +44,8 @@ if (!/^\d+\.\d+\.\d+(-[a-z0-9.]+)?$/.test(pkg.version)) {
   errors.push(`version "${pkg.version}" is not valid semver`);
 }
 
-if (pkg.publishConfig?.access !== 'restricted') {
-  errors.push('publishConfig.access must be restricted');
+if (pkg.publishConfig?.access !== 'restricted' && pkg.publishConfig?.access !== 'public') {
+  errors.push('publishConfig.access must be either "restricted" or "public"');
 }
 
 if (pkg.publishConfig?.registry !== 'https://registry.npmjs.org/') {

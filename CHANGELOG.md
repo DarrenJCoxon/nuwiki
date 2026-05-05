@@ -4,6 +4,12 @@ All notable changes to `@nusoft/nuwiki` will be documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project follows semantic versioning.
 
+## [0.1.3] — 2026-05-05
+
+### Changed
+
+- Bumped `@nusoft/nuvector` to `0.1.3` to pull in the postgres `metadataMatch` filter fix (tenant-internal isolation).
+
 ## [0.1.0] — 2026-05-04
 
 First public release. The NuWiki compilation engine, all five adapters, the seven quality layers, the WikiPack extension surface, and the 17/17 contract conformance suite.
