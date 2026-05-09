@@ -4,6 +4,16 @@ All notable changes to `@nusoft/nuwiki` will be documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project follows semantic versioning.
 
+## [0.1.4] — 2026-05-09
+
+### Changed — `@nusoft/nuvector` dependency now uses caret range
+
+Dependency on `@nusoft/nuvector` changed from exact `"0.1.3"` to `"^0.1.3"`. No behavioural change in this package; the change lets downstream consumers (notably `@nusoft/nuos`) declare a higher caret range without npm losing the ability to dedupe NuVector copies in `node_modules`.
+
+Mirror of the same fix shipped in `@nusoft/nuflow@0.4.1` ([WU 131](https://github.com/DarrenJCoxon/nuos/blob/main/docs/build/work-units/done/131-cross-package-coordination-cleanups.md)) and surfaced again here during [WU 133](https://github.com/DarrenJCoxon/nuos/blob/main/docs/build/work-units/133-comprehensive-nuos-trifecta-integration.md) (the comprehensive `@nusoft/nuos` trifecta integration via `createNuOS`). Same root cause, same fix; the trifecta is now consistent.
+
+The exact-pin pattern is rejected as a NuOS convention going forward. Producers express compatibility with carets; consumers that need to lock a specific transitive version do so in their own `package.json`.
+
 ## [0.1.3] — 2026-05-05
 
 ### Changed

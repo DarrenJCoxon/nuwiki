@@ -1,6 +1,6 @@
 {
   "name": "@nusoft/nuwiki",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Private NuWiki — the compiled knowledge engine of NuOS. Maintains a living, cited, role-aware substrate of institutional understanding (LLM-compiled from authoritative sources) and publishes every article into NuVector's four-layer index.",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
@@ -62,7 +62,7 @@
     "verify:nuwiki": "node scripts/verify-nuwiki-package.cjs"
   },
   "dependencies": {
-    "@nusoft/nuvector": "0.1.3"
+    "@nusoft/nuvector": "^0.1.3"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
