@@ -23,7 +23,7 @@
  * - WU 047: v0.1.0 publish
  */
 
-import { CompilationEngine } from './compilation.js';
+import { CompilationEngine, buildSectionEmbeddingText } from './compilation.js';
 import { redactArticle } from './redaction.js';
 import { runIntegrityPass } from './integrity.js';
 import { suggestNewArticles } from './suggestions.js';
@@ -39,9 +39,11 @@ import type {
   ExportFormat,
   ExportRef,
   FollowLinksRequest,
+  GenerationRecord,
   IntegrityPassRequest,
   IntegrityPassResult,
   KnowledgeRef,
+  LLMCompilationOutput,
   ListFilters,
   NuWikiArticle,
   ReadRequest,
@@ -347,6 +349,210 @@ export class NuWiki {
       status: filters.status,
       limit: filters.limit,
     });
+  }
+
+  /**
+   * Seed a pre-authored article directly into NuWiki, bypassing LLM compilation.
+   *
+   * For content packs that ship pre-authored articles without LLM compilation
+   * (e.g. operator-verified statutory guidance). The `structuredBody` must
+   * conform to `LLMCompilationOutput` shape and is produced by the pack's
+   * deterministic parser, not by an LLM call.
+   *
+   * Idempotent: re-seeding the same article (same documentType + subject) will
+   * upsert metadata and overwrite the stored body to the pack's current version.
+   *
+   * The LLM adapter is used only for computing embeddings (section + citation
+   * vectors). No generative call is made.
+   *
+   * @see WU 094 architect brief — Choice 5 (direct-seed bypass entry point)
+   */
+  async seed(args: {
+    documentType: string;
+    subject: SubjectRef;
+    structuredBody: LLMCompilationOutput;
+    generatedBy: GenerationRecord;
+  }): Promise<{ articleId: string; versionId: string }> {
+    const { documentType, subject, structuredBody, generatedBy } = args;
+
+    const docType = this.#documentTypes.get(documentType);
+    if (!docType) {
+      throw new Error(`NuWiki.seed: documentType '${documentType}' is not registered`);
+    }
+
+    const articleId = `${documentType}:${subject.kind}:${subject.id}`;
+    const existing = await this.#metadata.getArticle(articleId);
+
+    // Compute the next version (v1 for new articles, v2+ for re-seeds).
+    const predecessorVersion = existing?.currentVersion;
+    const newVersion = predecessorVersion
+      ? `v${parseInt(predecessorVersion.slice(1), 10) + 1}`
+      : 'v1';
+    const versionId = `${documentType}/${subject.id}/${newVersion}`;
+    const now = new Date().toISOString();
+
+    // Write the structured body to object storage.
+    const structuredKey = `nuwiki/${this.#tenant}/${articleId}/${versionId}.json`;
+    const bodyJson = JSON.stringify(structuredBody);
+    const bodyRef = await this.#bodies.put(
+      { key: structuredKey, contentType: 'application/json' },
+      bodyJson,
+    );
+
+    // Compute a cheap hash for the version record.
+    const bodyHash = Array.from(
+      new Uint8Array(
+        await crypto.subtle.digest(
+          'SHA-1',
+          new TextEncoder().encode(bodyJson.slice(0, 512)),
+        ),
+      ),
+    )
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('')
+      .slice(0, 16);
+
+    // Upsert the version record.
+    await this.#metadata.upsertVersion({
+      id: versionId,
+      articleId,
+      version: newVersion,
+      bodyRef,
+      bodyHash,
+      publishedAt: now,
+      predecessorVersion,
+    });
+
+    // Upsert the article record.
+    const path = `/${documentType}/${subject.kind}/${subject.id}`;
+    await this.#metadata.upsertArticle({
+      id: articleId,
+      tenant: this.#tenant,
+      documentType,
+      subject,
+      path,
+      currentVersion: newVersion,
+      status: 'published',
+      metadata: { seededBy: 'nuwiki_seed', packVersion: generatedBy.promptVersion ?? 'unknown' },
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    });
+
+    // Compute embeddings (LLM used for embeddings only — no generative call).
+    const summaryEmbedding = await this.#llmAdapter.embed(structuredBody.summary);
+    const usePrefix = docType.retrievalHints.embedSectionsWithSummaryPrefix !== false;
+    const sectionEmbeddings = await Promise.all(
+      structuredBody.sections.map((s) =>
+        this.#llmAdapter.embed(
+          buildSectionEmbeddingText(structuredBody.summary, s, { withPrefix: usePrefix }),
+        ),
+      ),
+    );
+    const citationEmbeddings = docType.precisionIndexable
+      ? await Promise.all(structuredBody.citations.map((c) => this.#llmAdapter.embed(c.claim)))
+      : [];
+
+    // Publish to NuVector (layers 1–4).
+    const tenant = this.#tenant;
+    const records: Parameters<NuVectorAdapter['upsertBatch']>[0] = [];
+
+    records.push({
+      id: `summary:${articleId}:${newVersion}`,
+      kind: 'nuwiki_article_summary',
+      embedding: summaryEmbedding,
+      text: structuredBody.summary,
+      tenant,
+      metadata: {
+        articleId,
+        documentType: docType.type,
+        subject,
+        version: newVersion,
+        sectionCount: structuredBody.sections.length,
+        lastCompiledAt: now,
+        isFresh: true,
+        agentReadingHints: docType.retrievalHints.agentReadingHints,
+      },
+    });
+
+    structuredBody.sections.forEach((s, i) => {
+      records.push({
+        id: `section:${articleId}:${newVersion}:${s.key}`,
+        kind: 'nuwiki_section',
+        embedding: sectionEmbeddings[i],
+        text: s.text,
+        tenant,
+        metadata: {
+          articleId,
+          documentType: docType.type,
+          subject,
+          version: newVersion,
+          sectionKey: s.key,
+          sectionHeading: s.heading,
+          citationCount: s.citationIds.length,
+          parentArticleSummary: structuredBody.summary,
+          position: s.position,
+        },
+      });
+    });
+
+    if (docType.precisionIndexable) {
+      structuredBody.citations.forEach((c, i) => {
+        records.push({
+          id: `citation:${articleId}:${newVersion}:${c.id}`,
+          kind: 'nuwiki_citation',
+          embedding: citationEmbeddings[i],
+          text: c.claim,
+          tenant,
+          metadata: {
+            articleId,
+            documentType: docType.type,
+            subject,
+            version: newVersion,
+            citationId: c.id,
+            sourceRef: c.source,
+            confidence: c.confidence,
+          },
+        });
+      });
+    }
+
+    await this.#memoryAdapter.upsertBatch(records);
+
+    // Layer 4 — graph node (no outbound edges from statutory articles at v0.1).
+    await this.#memoryAdapter.graph.upsertNodeWithEdges({
+      nodeId: articleId,
+      outboundEdges: structuredBody.outboundLinks.map((l) => ({
+        to: l.toArticleId,
+        type: l.linkType,
+      })),
+    });
+
+    // Provenance record. Uses 'nuwiki_compile' kind (established NuVector kind)
+    // with outcome 'compiled'. The seed operation is distinguished from LLM
+    // compilation by metadata.seededBy='nuwiki_seed'.
+    await this.#memoryAdapter.remember({
+      id: `prov_seed_${articleId}_${newVersion}`,
+      kind: 'nuwiki_compile',
+      capturedAt: now,
+      evidence: [],
+      outcome: 'compiled',
+      metadata: {
+        articleId,
+        version: newVersion,
+        documentType,
+        seededBy: 'nuwiki_seed',
+        triggeredBy: generatedBy.triggeredBy,
+      },
+    });
+
+    // Supersede predecessor NuVector records on re-seed.
+    if (predecessorVersion) {
+      await this.#memoryAdapter.markSuperseded({
+        pattern: `*:${articleId}:${predecessorVersion}*`,
+      });
+    }
+
+    return { articleId, versionId };
   }
 
   async archive(request: ArchiveRequest): Promise<void> {

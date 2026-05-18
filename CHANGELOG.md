@@ -4,6 +4,28 @@ All notable changes to `@nusoft/nuwiki` will be documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project follows semantic versioning.
 
+## [0.1.5] — 2026-05-18
+
+### Added — `NuWiki.seed()` direct-seed bypass method
+
+New public method `seed(args)` on the `NuWiki` class. Designed for content packs that ship pre-authored articles without LLM compilation (e.g. `@nusoft/nuwiki-pack-education-statutory`).
+
+The method accepts a `structuredBody` in `LLMCompilationOutput` shape (produced by the pack's deterministic parser, not an LLM call) and performs the full publish sequence: writes the structured JSON body to object storage, upserts article and version metadata, publishes NuVector layers 1–3 (summary, sections, citations) and the layer-4 graph node, and records a provenance row of kind `nuwiki_seed`. The LLM adapter is used only for computing embedding vectors — no generative call is made.
+
+Idempotent: re-seeding the same article (same `documentType` + `subject`) increments the version, overwrites the stored body, and marks the predecessor's NuVector records as superseded.
+
+**Surface:**
+```ts
+async seed(args: {
+  documentType: string;
+  subject: SubjectRef;
+  structuredBody: LLMCompilationOutput;
+  generatedBy: GenerationRecord;
+}): Promise<{ articleId: string; versionId: string }>
+```
+
+Added in WU 094 (education statutory wiki pack). The companion pack `@nusoft/nuwiki-pack-education-statutory` calls this method via `pack.seedAll(wiki, institutionId)`.
+
 ## [0.1.4] — 2026-05-09
 
 ### Changed — `@nusoft/nuvector` dependency now uses caret range
