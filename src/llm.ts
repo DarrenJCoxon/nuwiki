@@ -60,6 +60,23 @@ export interface VertexAIConfig {
   http?: HttpClient;
   /** Vertex API endpoint. Defaults to the regional endpoint. */
   endpoint?: string;
+  /**
+   * Max concurrent embed requests in flight. Default 4. Vertex's per-minute
+   * QPM quotas trip easily under unconcurrency-limited Promise.all bursts
+   * (a NuWiki seed of 4 articles fires ~30+ embed requests in parallel).
+   */
+  maxConcurrentEmbeds?: number;
+  /**
+   * Max retries on 429 / 5xx for both embed and generate. Default 5. Set to 0
+   * to disable retries (the adapter then throws on the first transient failure).
+   */
+  maxRetries?: number;
+  /**
+   * Base delay (ms) for exponential backoff. Actual wait is
+   * `baseRetryDelayMs * 2^attempt + jitter`. Vertex's `Retry-After` header,
+   * when present, takes precedence. Default 1000.
+   */
+  baseRetryDelayMs?: number;
 }
 
 export class VertexAILLMAdapter implements LLMAdapter {
@@ -67,6 +84,11 @@ export class VertexAILLMAdapter implements LLMAdapter {
   readonly #http: HttpClient;
   readonly #region: string;
   readonly #endpoint: string;
+  readonly #maxConcurrentEmbeds: number;
+  readonly #maxRetries: number;
+  readonly #baseRetryDelayMs: number;
+  #embedSlotsAvailable: number;
+  #embedWaiters: Array<() => void> = [];
 
   constructor(config: VertexAIConfig) {
     this.#config = config;
@@ -74,11 +96,61 @@ export class VertexAILLMAdapter implements LLMAdapter {
     this.#region = config.region ?? 'europe-west2';
     this.#endpoint =
       config.endpoint ?? `https://${this.#region}-aiplatform.googleapis.com/v1`;
+    this.#maxConcurrentEmbeds = config.maxConcurrentEmbeds ?? 4;
+    this.#maxRetries = config.maxRetries ?? 5;
+    this.#baseRetryDelayMs = config.baseRetryDelayMs ?? 1000;
+    this.#embedSlotsAvailable = this.#maxConcurrentEmbeds;
   }
 
   async #headers(): Promise<Record<string, string>> {
     const token = await this.#config.getAuthToken();
     return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  }
+
+  // Semaphore so a Promise.all over embed() doesn't fire more than
+  // maxConcurrentEmbeds requests in parallel.
+  async #acquireEmbedSlot(): Promise<void> {
+    if (this.#embedSlotsAvailable > 0) {
+      this.#embedSlotsAvailable--;
+      return;
+    }
+    await new Promise<void>((resolve) => this.#embedWaiters.push(resolve));
+    this.#embedSlotsAvailable--;
+  }
+
+  #releaseEmbedSlot(): void {
+    this.#embedSlotsAvailable++;
+    const next = this.#embedWaiters.shift();
+    if (next) next();
+  }
+
+  // Retryable POST with exponential backoff on 429 + 5xx. Honours the
+  // `Retry-After` header (seconds) when Vertex sends it.
+  async #postWithRetry(
+    url: string,
+    body: unknown,
+    label: 'generate' | 'embed',
+  ): Promise<Response> {
+    let attempt = 0;
+    while (true) {
+      const res = await this.#http(url, {
+        method: 'POST',
+        headers: await this.#headers(),
+        body: JSON.stringify(body),
+      });
+      if (res.ok) return res;
+      const retryable = res.status === 429 || res.status >= 500;
+      if (!retryable || attempt >= this.#maxRetries) {
+        throw new Error(`Vertex ${label} failed: ${res.status} ${res.statusText}`);
+      }
+      const retryAfterHeader = res.headers.get('retry-after');
+      const retryAfterSec = retryAfterHeader ? Number(retryAfterHeader) : NaN;
+      const waitMs = Number.isFinite(retryAfterSec) && retryAfterSec > 0
+        ? retryAfterSec * 1000
+        : this.#baseRetryDelayMs * Math.pow(2, attempt) + Math.random() * 500;
+      await new Promise((r) => setTimeout(r, waitMs));
+      attempt++;
+    }
   }
 
   async generate(request: LLMGenerationRequest): Promise<LLMGenerationResult> {
@@ -99,12 +171,7 @@ export class VertexAILLMAdapter implements LLMAdapter {
         maxOutputTokens: request.maxTokens,
       },
     };
-    const res = await this.#http(url, {
-      method: 'POST',
-      headers: await this.#headers(),
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(`Vertex generate failed: ${res.status} ${res.statusText}`);
+    const res = await this.#postWithRetry(url, body, 'generate');
     const data = (await res.json()) as VertexGenerateResponse;
     const candidate = data.candidates?.[0];
     const content = candidate?.content?.parts?.[0]?.text ?? '';
@@ -125,15 +192,15 @@ export class VertexAILLMAdapter implements LLMAdapter {
     const model = this.#config.embeddingModel;
     const url = `${this.#endpoint}/projects/${this.#config.projectId}/locations/${this.#region}/publishers/google/models/${model}:predict`;
     const body = { instances: [{ content: text }] };
-    const res = await this.#http(url, {
-      method: 'POST',
-      headers: await this.#headers(),
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(`Vertex embed failed: ${res.status} ${res.statusText}`);
-    const data = (await res.json()) as VertexEmbedResponse;
-    const values = data.predictions?.[0]?.embeddings?.values ?? [];
-    return new Float32Array(values);
+    await this.#acquireEmbedSlot();
+    try {
+      const res = await this.#postWithRetry(url, body, 'embed');
+      const data = (await res.json()) as VertexEmbedResponse;
+      const values = data.predictions?.[0]?.embeddings?.values ?? [];
+      return new Float32Array(values);
+    } finally {
+      this.#releaseEmbedSlot();
+    }
   }
 }
 

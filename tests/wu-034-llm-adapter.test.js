@@ -30,6 +30,7 @@ function mockHttp(responses) {
       ok: next.ok,
       status: next.status,
       statusText: next.statusText ?? '',
+      headers: next.headers ?? new Headers(),
       text: async () => next.body ?? '',
       json: async () => next.json ?? {},
     };
@@ -156,8 +157,8 @@ describe('§1 VertexAILLMAdapter', () => {
     assert.equal(count, 2);
   });
 
-  test('non-ok response throws', async () => {
-    const m = mockHttp([{ ok: false, status: 500, statusText: 'Internal' }]);
+  test('non-retryable non-ok response throws immediately (e.g. 400)', async () => {
+    const m = mockHttp([{ ok: false, status: 400, statusText: 'Bad Request', headers: new Headers() }]);
     const a = new VertexAILLMAdapter({
       projectId: 'p',
       generationModel: 'gemini-flash-3',
@@ -165,7 +166,44 @@ describe('§1 VertexAILLMAdapter', () => {
       getAuthToken: async () => 't',
       http: m.http,
     });
+    await assert.rejects(() => a.generate({ systemPrompt: '', userPrompt: 'x', context: [] }), /400/);
+  });
+
+  test('retryable 429 is retried with backoff; succeeds on retry', async () => {
+    const m = mockHttp([
+      { ok: false, status: 429, statusText: 'Too Many Requests', headers: new Headers() },
+      { ok: true, status: 200, json: { predictions: [{ embeddings: { values: [0.1, 0.2, 0.3] } }] } },
+    ]);
+    const a = new VertexAILLMAdapter({
+      projectId: 'p',
+      generationModel: 'gemini-flash-3',
+      embeddingModel: 'text-embedding-005',
+      getAuthToken: async () => 't',
+      http: m.http,
+      baseRetryDelayMs: 1, // keep the test fast
+    });
+    const out = await a.embed('hello');
+    assert.equal(out.length, 3);
+    assert.equal(m.calls.length, 2);
+  });
+
+  test('retryable 5xx exhausts retries then throws', async () => {
+    const m = mockHttp([
+      { ok: false, status: 500, statusText: 'Internal', headers: new Headers() },
+      { ok: false, status: 500, statusText: 'Internal', headers: new Headers() },
+      { ok: false, status: 500, statusText: 'Internal', headers: new Headers() },
+    ]);
+    const a = new VertexAILLMAdapter({
+      projectId: 'p',
+      generationModel: 'gemini-flash-3',
+      embeddingModel: 'text-embedding-005',
+      getAuthToken: async () => 't',
+      http: m.http,
+      maxRetries: 2, // 1 initial + 2 retries = 3 attempts
+      baseRetryDelayMs: 1,
+    });
     await assert.rejects(() => a.generate({ systemPrompt: '', userPrompt: 'x', context: [] }), /500/);
+    assert.equal(m.calls.length, 3);
   });
 });
 
