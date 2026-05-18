@@ -47,8 +47,12 @@ export function redactArticle(input: RedactArticleInput): RedactArticleOutput {
   }
 
   // Article-level: role not in defaultRoles AND no section redactionRules
-  // mention the role → article is hidden.
-  const roleInDefault = visibility.defaultRoles.includes(viewerRole);
+  // mention the role → article is hidden. The wildcard '*' in defaultRoles
+  // matches any viewer role (used by statutory packs whose content is
+  // universally readable by all staff roles).
+  const roleInDefault =
+    visibility.defaultRoles.includes('*') ||
+    visibility.defaultRoles.includes(viewerRole);
   const roleMentionedInAnySectionRule = (documentType.sections ?? []).some(
     (s) => roleAppearsInRules(viewerRole, s.redactionRules),
   );

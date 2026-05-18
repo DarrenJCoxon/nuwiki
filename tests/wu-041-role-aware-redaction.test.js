@@ -129,6 +129,20 @@ describe('§1 redactArticle', () => {
     assert.equal(r.warnings[0].details.reason, 'role_not_in_default');
   });
 
+  test('defaultRoles: ["*"] matches any viewer role (wildcard for universally-readable content)', () => {
+    const docType = makeDocType({
+      visibility: { defaultRoles: ['*'], excludedRoles: [] },
+      sections: [{ key: 'overview', heading: 'Overview', required: true }],
+    });
+    for (const role of ['DSL', 'Head', 'SENCO', 'teaching_assistant', 'parent', 'arbitrary_role']) {
+      const r = redactArticle({
+        documentType: docType, parsed: makeParsed(), viewerRole: role,
+      });
+      assert.doesNotMatch(r.body, /Article hidden/, `role '${role}' should NOT be hidden under defaultRoles: ['*']`);
+      assert.match(r.body, /## Overview/, `body should contain rendered section for role '${role}'`);
+    }
+  });
+
   test('redact action default replacement reads "[Section redacted: <heading>]"', () => {
     const docType = makeDocType({
       sections: [
