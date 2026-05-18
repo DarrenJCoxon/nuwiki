@@ -539,14 +539,9 @@ export class CompilationEngine {
 
     await this.#cfg.memoryAdapter.upsertBatch(records);
 
-    // Layer 4 — graph
-    await this.#cfg.memoryAdapter.graph.upsertNodeWithEdges({
-      nodeId: articleId,
-      outboundEdges: parsed.outboundLinks.map((l) => ({
-        to: l.toArticleId,
-        type: l.linkType,
-      })),
-    });
+    // D064: graph writes removed at v0.1. Cross-article relationships live as
+    // [[name]] wiki-links inside article bodies. The graph layer is deferred
+    // until a real consumer requires explicit traversal.
 
     // Provenance
     await this.#cfg.memoryAdapter.remember({

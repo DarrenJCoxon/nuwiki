@@ -518,14 +518,9 @@ export class NuWiki {
 
     await this.#memoryAdapter.upsertBatch(records);
 
-    // Layer 4 — graph node (no outbound edges from statutory articles at v0.1).
-    await this.#memoryAdapter.graph.upsertNodeWithEdges({
-      nodeId: articleId,
-      outboundEdges: structuredBody.outboundLinks.map((l) => ({
-        to: l.toArticleId,
-        type: l.linkType,
-      })),
-    });
+    // D064: graph writes removed at v0.1. Cross-article relationships live as
+    // [[name]] wiki-links inside article bodies. The graph layer is deferred
+    // until a real consumer requires explicit traversal.
 
     // Provenance record. Uses 'nuwiki_compile' kind (established NuVector kind)
     // with outcome 'compiled'. The seed operation is distinguished from LLM

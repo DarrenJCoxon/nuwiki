@@ -416,7 +416,10 @@ describe('§12 NuVector publish contract', () => {
     assert.equal(layer1.length, 1);
     assert.equal(layer2.length, 2);
     assert.equal(layer3.length, 1);
-    assert.equal(memory.calls.graphUpsert.length, 1);
+    // D064: graph writes removed at v0.1. Cross-article relationships live as
+    // [[name]] wiki-links inside article bodies; graph layer is deferred until
+    // a real consumer requires explicit traversal.
+    assert.equal(memory.calls.graphUpsert.length, 0);
   });
 });
 

@@ -282,10 +282,10 @@ describe('§1 First compile — adapter call sequence + atomic publish', () => {
     assert.equal(batch[2].kind, 'nuwiki_section');
     assert.equal(batch[3].kind, 'nuwiki_citation');
 
-    // graph upsert
-    assert.equal(memoryAdapter.calls.graphUpsert.length, 1);
-    assert.equal(memoryAdapter.calls.graphUpsert[0].nodeId, 'pupil_profile:pupil:p_456');
-    assert.equal(memoryAdapter.calls.graphUpsert[0].outboundEdges.length, 1);
+    // graph upsert removed at v0.1 per D064 (graph deferred until a real
+    // consumer requires explicit traversal; cross-article links live as
+    // [[name]] wiki-links inside article bodies).
+    assert.equal(memoryAdapter.calls.graphUpsert.length, 0);
 
     // provenance
     assert.equal(memoryAdapter.calls.remember.length, 1);
@@ -433,17 +433,8 @@ describe('§5 NuVector publish failure', () => {
     assert.equal(metadata.calls.upsertArticle.at(-1).status, 'blocked');
   });
 
-  test('graph upsert failure → blocked; provenance not written; metadata flipped', async () => {
-    const { wiki, metadata, memoryAdapter } = await buildWiki({ failMemoryOn: 'graphUpsert' });
-    const result = await wiki.compile({
-      documentType: 'pupil_profile',
-      subject: { kind: 'pupil', id: 'p_456' },
-      trigger: { kind: 'scheduled_refresh' },
-    });
-    assert.equal(result.status, 'blocked');
-    assert.equal(memoryAdapter.calls.remember.length, 0);
-    assert.equal(metadata.calls.upsertArticle.at(-1).status, 'blocked');
-  });
+  // D064: graph upsert removed from compile path at v0.1, so the
+  // graph-failure-as-blocker scenario is no longer reachable. Test removed.
 });
 
 // ---------------------------------------------------------------------------
