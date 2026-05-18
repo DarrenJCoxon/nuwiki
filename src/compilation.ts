@@ -267,7 +267,7 @@ export class CompilationEngine {
       predecessorVersion,
     };
     try {
-      await this.#cfg.metadata.upsertVersion(versionRecord);
+      // Upsert the article record first (parent row required by the version FK).
       await this.#cfg.metadata.upsertArticle({
         id: articleId,
         tenant: this.#cfg.tenant,
@@ -280,6 +280,7 @@ export class CompilationEngine {
         createdAt: existing?.createdAt ?? compiledAt,
         updatedAt: compiledAt,
       });
+      await this.#cfg.metadata.upsertVersion(versionRecord);
     } catch (err) {
       return blockedResult({
         articleId,

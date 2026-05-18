@@ -412,18 +412,7 @@ export class NuWiki {
       .join('')
       .slice(0, 16);
 
-    // Upsert the version record.
-    await this.#metadata.upsertVersion({
-      id: versionId,
-      articleId,
-      version: newVersion,
-      bodyRef,
-      bodyHash,
-      publishedAt: now,
-      predecessorVersion,
-    });
-
-    // Upsert the article record.
+    // Upsert the article record first (parent row required by the version FK).
     const path = `/${documentType}/${subject.kind}/${subject.id}`;
     await this.#metadata.upsertArticle({
       id: articleId,
@@ -436,6 +425,17 @@ export class NuWiki {
       metadata: { seededBy: 'nuwiki_seed', packVersion: generatedBy.promptVersion ?? 'unknown' },
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
+    });
+
+    // Then upsert the version record (article_id FK is now satisfied).
+    await this.#metadata.upsertVersion({
+      id: versionId,
+      articleId,
+      version: newVersion,
+      bodyRef,
+      bodyHash,
+      publishedAt: now,
+      predecessorVersion,
     });
 
     // Compute embeddings (LLM used for embeddings only — no generative call).
