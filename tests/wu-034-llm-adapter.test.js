@@ -205,6 +205,53 @@ describe('§1 VertexAILLMAdapter', () => {
     await assert.rejects(() => a.generate({ systemPrompt: '', userPrompt: 'x', context: [] }), /500/);
     assert.equal(m.calls.length, 3);
   });
+
+  test('embedBatch sends a single :predict request with multiple instances', async () => {
+    const m = mockHttp([{
+      ok: true, status: 200,
+      json: {
+        predictions: [
+          { embeddings: { values: [0.1, 0.2] } },
+          { embeddings: { values: [0.3, 0.4] } },
+          { embeddings: { values: [0.5, 0.6] } },
+        ],
+      },
+    }]);
+    const a = new VertexAILLMAdapter({
+      projectId: 'p',
+      generationModel: 'gemini-flash-3',
+      embeddingModel: 'text-embedding-005',
+      getAuthToken: async () => 't',
+      http: m.http,
+    });
+    const out = await a.embedBatch(['a', 'b', 'c']);
+    assert.equal(m.calls.length, 1);
+    assert.equal(out.length, 3);
+    assert.equal(out[0].length, 2);
+    assert.ok(out[0] instanceof Float32Array);
+    const body = JSON.parse(m.calls[0].init.body);
+    assert.equal(body.instances.length, 3);
+    assert.equal(body.instances[0].content, 'a');
+  });
+
+  test('embedBatch chunks at 100 instances per request', async () => {
+    const responses = [
+      { ok: true, status: 200, json: { predictions: Array.from({ length: 100 }, (_, i) => ({ embeddings: { values: [i] } })) } },
+      { ok: true, status: 200, json: { predictions: Array.from({ length: 50 }, (_, i) => ({ embeddings: { values: [100 + i] } })) } },
+    ];
+    const m = mockHttp(responses);
+    const a = new VertexAILLMAdapter({
+      projectId: 'p',
+      generationModel: 'gemini-flash-3',
+      embeddingModel: 'text-embedding-005',
+      getAuthToken: async () => 't',
+      http: m.http,
+    });
+    const texts = Array.from({ length: 150 }, (_, i) => `t${i}`);
+    const out = await a.embedBatch(texts);
+    assert.equal(m.calls.length, 2);
+    assert.equal(out.length, 150);
+  });
 });
 
 // ---------------------------------------------------------------------------

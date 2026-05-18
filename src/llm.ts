@@ -189,18 +189,43 @@ export class VertexAILLMAdapter implements LLMAdapter {
   }
 
   async embed(text: string): Promise<Float32Array> {
+    const [vec] = await this.embedBatch([text]);
+    return vec;
+  }
+
+  /**
+   * Batch embed via Vertex's native multi-instance `:predict` endpoint.
+   * Vertex accepts up to 250 instances per call for text-embedding-004 and
+   * text-embedding-005; we chunk conservatively at 100 to stay well under
+   * the per-request payload size limit and keep individual retries small.
+   *
+   * Concurrency across chunks is limited by the same embed-slot semaphore
+   * used by single embed(), so a caller passing 500 texts hits Vertex with
+   * `maxConcurrentEmbeds` simultaneous chunks, not 5 simultaneous chunks.
+   */
+  async embedBatch(texts: string[]): Promise<Float32Array[]> {
+    if (texts.length === 0) return [];
     const model = this.#config.embeddingModel;
     const url = `${this.#endpoint}/projects/${this.#config.projectId}/locations/${this.#region}/publishers/google/models/${model}:predict`;
-    const body = { instances: [{ content: text }] };
-    await this.#acquireEmbedSlot();
-    try {
-      const res = await this.#postWithRetry(url, body, 'embed');
-      const data = (await res.json()) as VertexEmbedResponse;
-      const values = data.predictions?.[0]?.embeddings?.values ?? [];
-      return new Float32Array(values);
-    } finally {
-      this.#releaseEmbedSlot();
+    const CHUNK_SIZE = 100;
+    const chunks: string[][] = [];
+    for (let i = 0; i < texts.length; i += CHUNK_SIZE) {
+      chunks.push(texts.slice(i, i + CHUNK_SIZE));
     }
+    const results = await Promise.all(
+      chunks.map(async (chunk) => {
+        await this.#acquireEmbedSlot();
+        try {
+          const body = { instances: chunk.map((content) => ({ content })) };
+          const res = await this.#postWithRetry(url, body, 'embed');
+          const data = (await res.json()) as VertexEmbedResponse;
+          return (data.predictions ?? []).map((p) => new Float32Array(p.embeddings?.values ?? []));
+        } finally {
+          this.#releaseEmbedSlot();
+        }
+      }),
+    );
+    return results.flat();
   }
 }
 

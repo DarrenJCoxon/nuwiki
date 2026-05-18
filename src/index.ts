@@ -62,6 +62,7 @@ import type {
   NuVectorAdapter,
   ObjectStorageAdapter,
 } from './adapters.js';
+import { embedAllOrBatch } from './adapters.js';
 
 export * from './types.js';
 export * from './adapters.js';
@@ -439,18 +440,21 @@ export class NuWiki {
     });
 
     // Compute embeddings (LLM used for embeddings only — no generative call).
-    const summaryEmbedding = await this.#llmAdapter.embed(structuredBody.summary);
+    // Use embedAllOrBatch so adapters with a native batch API (e.g. Vertex AI's
+    // multi-instance :predict) submit one API call per ~100 texts instead of
+    // one per text, which avoids tripping per-minute quotas on first-time seeds.
     const usePrefix = docType.retrievalHints.embedSectionsWithSummaryPrefix !== false;
-    const sectionEmbeddings = await Promise.all(
-      structuredBody.sections.map((s) =>
-        this.#llmAdapter.embed(
-          buildSectionEmbeddingText(structuredBody.summary, s, { withPrefix: usePrefix }),
-        ),
-      ),
+    const sectionTexts = structuredBody.sections.map((s) =>
+      buildSectionEmbeddingText(structuredBody.summary, s, { withPrefix: usePrefix }),
     );
-    const citationEmbeddings = docType.precisionIndexable
-      ? await Promise.all(structuredBody.citations.map((c) => this.#llmAdapter.embed(c.claim)))
+    const citationTexts = docType.precisionIndexable
+      ? structuredBody.citations.map((c) => c.claim)
       : [];
+    const allTexts = [structuredBody.summary, ...sectionTexts, ...citationTexts];
+    const allEmbeds = await embedAllOrBatch(this.#llmAdapter, allTexts);
+    const summaryEmbedding = allEmbeds[0];
+    const sectionEmbeddings = allEmbeds.slice(1, 1 + sectionTexts.length);
+    const citationEmbeddings = allEmbeds.slice(1 + sectionTexts.length);
 
     // Publish to NuVector (layers 1–4).
     const tenant = this.#tenant;

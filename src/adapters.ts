@@ -179,6 +179,29 @@ export interface LLMGenerationResult {
 export interface LLMAdapter {
   generate(request: LLMGenerationRequest): Promise<LLMGenerationResult>;
   embed(text: string): Promise<Float32Array>;
+  /**
+   * Optional batch embed. Adapters that support a native batch API (e.g.
+   * Vertex AI's `instances: [...]` array on `:predict`) implement this to
+   * cut per-minute quota pressure dramatically — one API call instead of
+   * one per text. Callers prefer `embedBatch` when available; the
+   * `embedAllOrBatch()` helper handles the fallback to N parallel `embed()`
+   * calls automatically.
+   */
+  embedBatch?(texts: string[]): Promise<Float32Array[]>;
+}
+
+/**
+ * Embed a list of texts, preferring the adapter's batch API when available.
+ * Falls back to `Promise.all(texts.map(embed))` for adapters that only
+ * implement single embed.
+ */
+export async function embedAllOrBatch(
+  adapter: LLMAdapter,
+  texts: string[],
+): Promise<Float32Array[]> {
+  if (texts.length === 0) return [];
+  if (adapter.embedBatch) return adapter.embedBatch(texts);
+  return Promise.all(texts.map((t) => adapter.embed(t)));
 }
 
 // ---------------------------------------------------------------------------

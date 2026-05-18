@@ -29,6 +29,7 @@ import type {
   NuVectorAdapter,
   ObjectStorageAdapter,
 } from './adapters.js';
+import { embedAllOrBatch } from './adapters.js';
 import type {
   ArticleStatus,
   ArticleWarning,
@@ -213,18 +214,21 @@ export class CompilationEngine {
       });
     }
 
-    // Step 3 — compute embeddings
+    // Step 3 — compute embeddings (via batch-or-fallback so Vertex et al. submit
+    // one API call per ~100 texts instead of one per text).
     const llm = this.#cfg.llmAdapter;
-    const summaryEmbedding = await llm.embed(parsed.summary);
     const usePrefix = docType.retrievalHints.embedSectionsWithSummaryPrefix !== false;
-    const sectionEmbeddings = await Promise.all(
-      parsed.sections.map((s) =>
-        llm.embed(buildSectionEmbeddingText(parsed.summary, s, { withPrefix: usePrefix })),
-      ),
+    const sectionTexts = parsed.sections.map((s) =>
+      buildSectionEmbeddingText(parsed.summary, s, { withPrefix: usePrefix }),
     );
-    const citationEmbeddings = docType.precisionIndexable
-      ? await Promise.all(parsed.citations.map((c) => llm.embed(c.claim)))
+    const citationTexts = docType.precisionIndexable
+      ? parsed.citations.map((c) => c.claim)
       : [];
+    const allTexts = [parsed.summary, ...sectionTexts, ...citationTexts];
+    const allEmbeds = await embedAllOrBatch(llm, allTexts);
+    const summaryEmbedding = allEmbeds[0];
+    const sectionEmbeddings = allEmbeds.slice(1, 1 + sectionTexts.length);
+    const citationEmbeddings = allEmbeds.slice(1 + sectionTexts.length);
 
     // Step 4 — write body + structured JSON to object storage.
     // The .md is the human/debug-facing form; the .json carries the full
