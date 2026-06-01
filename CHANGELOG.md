@@ -4,6 +4,25 @@ All notable changes to `@nusoft/nuwiki` will be documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project follows semantic versioning.
 
+## [0.2.0] — 2026-05-20
+
+### Changed — Scaleway replaces Vertex AI as the reference cloud LLM adapter
+
+The `VertexAILLMAdapter` reference implementation is replaced by `ScalewayLLMAdapter` consuming Scaleway's Generative APIs. The `LLMAdapter` interface is unchanged; no type changes; existing call sites against the interface continue to work.
+
+Consumers who construct `VertexAILLMAdapter` directly need to swap to `ScalewayLLMAdapter` and migrate their env vars:
+
+- `GOOGLE_VERTEX_CREDENTIALS` (base64 service account JSON) → `SCW_SECRET_KEY` (Scaleway secret key, used as Bearer token)
+- `GOOGLE_CLOUD_PROJECT` → `SCW_DEFAULT_PROJECT_ID` (Scaleway project UUID)
+
+The default generation model is `qwen3.5-397b-a17b` (Qwen3 reasoning tier on Scaleway; "POPULAR" status); the default embedding model is `qwen3-embedding-8b` with Matryoshka truncation to 1024 dimensions. New pgvector indices opened by consumers must use `dimensions=1024` — see [D071](https://github.com/DarrenJCoxon/nuos/blob/main/docs/build/decisions/D071-vector-re-embedding-strategy-on-scaleway-migration.md) for the re-embedding strategy.
+
+The WU 094 retry+backoff and `embedBatch` work is preserved in the new adapter: in-class semaphore (default 4 concurrent embed requests), exponential backoff on 429/5xx with `Retry-After` header respect, 100-instance batch chunking on the embeddings endpoint.
+
+New export: `@nusoft/nuwiki/scaleway-config` — exposes `SCALEWAY_MODELS`, `SCALEWAY_EMBEDDING_DIMENSIONS`, `SCALEWAY_BASE_URL`, and `parseScalewayCredentialsFromEnv()` for consumers who need to construct the adapter from env vars.
+
+See [WU 141](https://github.com/DarrenJCoxon/nuos/blob/main/docs/build/work-units/141-nuwiki-vertex-to-scaleway-adapter.md), [D068](https://github.com/DarrenJCoxon/nuos/blob/main/docs/build/decisions/D068-scaleway-as-backend-llm-provider.md), [D069](https://github.com/DarrenJCoxon/nuos/blob/main/docs/build/decisions/D069-default-models-on-scaleway-by-tier.md), [D070](https://github.com/DarrenJCoxon/nuos/blob/main/docs/build/decisions/D070-llmadapter-semantic-tier-abstraction.md), [D071](https://github.com/DarrenJCoxon/nuos/blob/main/docs/build/decisions/D071-vector-re-embedding-strategy-on-scaleway-migration.md).
+
 ## [0.1.5] — 2026-05-18
 
 ### Added — `NuWiki.seed()` direct-seed bypass method

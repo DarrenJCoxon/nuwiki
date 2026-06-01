@@ -82,7 +82,7 @@ export interface CompilationEngineConfig {
   /**
    * Token counter used for summary-budget enforcement and layer-1 metadata.
    * Defaults to `estimateTokenCount` from `./tokens.js`. Consumers who need
-   * vendor-accurate counts (e.g. the Vertex tokenizer, OpenAI's tiktoken)
+   * vendor-accurate counts (e.g. the Scaleway tokenizer, OpenAI's tiktoken)
    * inject their own here. Model-agnostic per D020.
    */
   tokenCounter?: (text: string) => number;
@@ -214,7 +214,7 @@ export class CompilationEngine {
       });
     }
 
-    // Step 3 — compute embeddings (via batch-or-fallback so Vertex et al. submit
+    // Step 3 — compute embeddings (via batch-or-fallback so Scaleway et al. submit
     // one API call per ~100 texts instead of one per text).
     const llm = this.#cfg.llmAdapter;
     const usePrefix = docType.retrievalHints.embedSectionsWithSummaryPrefix !== false;

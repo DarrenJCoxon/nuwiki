@@ -1,26 +1,35 @@
 /**
  * `@nusoft/nuwiki/llm` — `LLMAdapter` reference implementations.
  *
- * Two production references plus a deterministic test stub. The pair covers
- * the operational topology described in
- * `nuos/docs/LOCAL-MODELS-FOR-SENSIGHT.md`:
+ * Two production references plus a deterministic test stub:
  *
- * - `VertexAILLMAdapter` — Tier 2 cloud / frontier reasoning. UK-resident
- *   region by default (`europe-west2`). Model-agnostic: the consumer names
- *   the current Gemini generation (Flash 3 / Flash Lite 3 / Pro 3 / etc.)
- *   and the current Vertex embedding model at deployment time.
+ * - `ScalewayLLMAdapter` — Tier 2 cloud / frontier reasoning via Scaleway's
+ *   Generative APIs (Paris EU data centre; no US parent company; no data
+ *   retention by default). Default models per D069: qwen3.5-397b-a17b for
+ *   generation; qwen3-embedding-8b with 1024-dim Matryoshka for embeddings.
+ *   Static Bearer auth (SCW_SECRET_KEY); project UUID in the URL path
+ *   (SCW_DEFAULT_PROJECT_ID). Preserves WU 094 retry+backoff and embedBatch
+ *   chunked-semaphore work.
  * - `OpenAICompatibleLLMAdapter` — Tier 1 local, or anything else exposing
- *   the OpenAI completion shape. Works against Ollama, vLLM, OpenRouter,
- *   any compatible endpoint. Tier 0 (Phi-3 on a laptop CPU) is also reachable
- *   through this adapter when served via Ollama or llama-server.
+ *   the OpenAI Chat Completions shape. Works against Ollama, vLLM, OpenRouter,
+ *   any compatible endpoint.
  * - `createStubLLMAdapter(scripted)` — deterministic test adapter.
  *
  * Adapters do not bundle provider SDKs. Each accepts a generic HTTP client
- * (`HttpClient`) so consumers wire their preferred fetch implementation, and
- * a per-call `getAuthToken()` so tokens can rotate without restarting the runtime.
+ * (`HttpClient`) so consumers wire their preferred fetch implementation.
+ *
+ * @see D068 — Scaleway as backend LLM provider
+ * @see D069 — default models by tier
+ * @see D070 — semantic-tier abstraction (tier map lives in scaleway-config.ts)
+ * @see D071 — 1024-dim Matryoshka embedding default
  */
 
 import type { LLMAdapter, LLMGenerationRequest, LLMGenerationResult } from './adapters.js';
+import {
+  SCALEWAY_MODELS,
+  SCALEWAY_EMBEDDING_DIMENSIONS,
+  SCALEWAY_BASE_URL,
+} from './scaleway-config.js';
 
 // ---------------------------------------------------------------------------
 // Shared types
@@ -31,38 +40,31 @@ export type HttpClient = (url: string, init?: RequestInit) => Promise<Response>;
 const defaultHttp: HttpClient = (url, init) => fetch(url, init);
 
 // ---------------------------------------------------------------------------
-// Vertex AI adapter (Tier 2 — frontier cloud, UK-resident by default)
+// Scaleway adapter (Tier 2 — frontier cloud, EU-resident, OpenAI-compatible)
 // ---------------------------------------------------------------------------
 
-export interface VertexAIConfig {
-  /** GCP project ID. */
+export interface ScalewayLLMAdapterConfig {
+  /** Scaleway project UUID. From SCW_DEFAULT_PROJECT_ID. */
   projectId: string;
-  /** Vertex region. Defaults to `europe-west2` (London) for UK data residency. */
-  region?: string;
+  /** Scaleway secret key (used as Bearer token). From SCW_SECRET_KEY. */
+  secretKey: string;
+  /** Generation model — defaults to qwen3.5-397b-a17b per D069. */
+  generationModel?: string;
+  /** Embedding model — defaults to qwen3-embedding-8b per D069. */
+  embeddingModel?: string;
   /**
-   * Generation model — required. The Vertex / Gemini lineup turns over every
-   * few months; the adapter is deliberately model-agnostic so it does not rot.
-   * The consumer names the current generation at deployment time
-   * (e.g. `gemini-flash-3`, `gemini-flash-lite-3`, `gemini-pro-3`, or whatever
-   * the live model IDs are when this is wired up).
+   * Embedding output dimension via Matryoshka truncation. Defaults to 1024
+   * per D071. The pgvector index dimensionality is set by this value and
+   * cannot be changed without a re-embed (drain-and-refill per D071).
    */
-  generationModel: string;
-  /**
-   * Embedding model — required. Same reasoning as `generationModel`: the
-   * embedding lineup also evolves. Pick whatever Vertex currently exposes in
-   * your region (e.g. `text-embedding-005`, `text-embedding-large-exp-03-07`,
-   * etc.).
-   */
-  embeddingModel: string;
-  /** Returns a fresh OAuth bearer token. Called per request. */
-  getAuthToken: () => Promise<string>;
-  /** HTTP client. Defaults to `globalThis.fetch`. */
+  embeddingDimensions?: number;
+  /** API base URL. Defaults to `https://api.scaleway.ai`. */
+  baseUrl?: string;
+  /** HTTP client. Defaults to globalThis.fetch. */
   http?: HttpClient;
-  /** Vertex API endpoint. Defaults to the regional endpoint. */
-  endpoint?: string;
   /**
-   * Max concurrent embed requests in flight. Default 4. Vertex's per-minute
-   * QPM quotas trip easily under unconcurrency-limited Promise.all bursts
+   * Max concurrent embed requests in flight. Default 4. Scaleway's per-minute
+   * rate limits trip easily under unconcurrency-limited Promise.all bursts
    * (a NuWiki seed of 4 articles fires ~30+ embed requests in parallel).
    */
   maxConcurrentEmbeds?: number;
@@ -73,38 +75,51 @@ export interface VertexAIConfig {
   maxRetries?: number;
   /**
    * Base delay (ms) for exponential backoff. Actual wait is
-   * `baseRetryDelayMs * 2^attempt + jitter`. Vertex's `Retry-After` header,
+   * `baseRetryDelayMs * 2^attempt + jitter`. Scaleway's `Retry-After` header,
    * when present, takes precedence. Default 1000.
    */
   baseRetryDelayMs?: number;
 }
 
-export class VertexAILLMAdapter implements LLMAdapter {
-  readonly #config: VertexAIConfig;
+export class ScalewayLLMAdapter implements LLMAdapter {
+  readonly #projectId: string;
+  readonly #secretKey: string;
+  readonly #generationModel: string;
+  readonly #embeddingModel: string;
+  readonly #embeddingDimensions: number;
+  readonly #baseUrl: string;
   readonly #http: HttpClient;
-  readonly #region: string;
-  readonly #endpoint: string;
   readonly #maxConcurrentEmbeds: number;
   readonly #maxRetries: number;
   readonly #baseRetryDelayMs: number;
   #embedSlotsAvailable: number;
   #embedWaiters: Array<() => void> = [];
 
-  constructor(config: VertexAIConfig) {
-    this.#config = config;
+  constructor(config: ScalewayLLMAdapterConfig) {
+    if (!config.projectId || config.projectId.trim() === '') {
+      throw new Error('ScalewayLLMAdapter: projectId is required');
+    }
+    if (!config.secretKey || config.secretKey.trim() === '') {
+      throw new Error('ScalewayLLMAdapter: secretKey is required');
+    }
+    this.#projectId = config.projectId;
+    this.#secretKey = config.secretKey;
+    this.#generationModel = config.generationModel ?? SCALEWAY_MODELS.reasoning;
+    this.#embeddingModel = config.embeddingModel ?? SCALEWAY_MODELS.embedding;
+    this.#embeddingDimensions = config.embeddingDimensions ?? SCALEWAY_EMBEDDING_DIMENSIONS;
+    this.#baseUrl = config.baseUrl ?? SCALEWAY_BASE_URL;
     this.#http = config.http ?? defaultHttp;
-    this.#region = config.region ?? 'europe-west2';
-    this.#endpoint =
-      config.endpoint ?? `https://${this.#region}-aiplatform.googleapis.com/v1`;
     this.#maxConcurrentEmbeds = config.maxConcurrentEmbeds ?? 4;
     this.#maxRetries = config.maxRetries ?? 5;
     this.#baseRetryDelayMs = config.baseRetryDelayMs ?? 1000;
     this.#embedSlotsAvailable = this.#maxConcurrentEmbeds;
   }
 
-  async #headers(): Promise<Record<string, string>> {
-    const token = await this.#config.getAuthToken();
-    return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  #headers(): Record<string, string> {
+    return {
+      Authorization: `Bearer ${this.#secretKey}`,
+      'Content-Type': 'application/json',
+    };
   }
 
   // Semaphore so a Promise.all over embed() doesn't fire more than
@@ -125,7 +140,7 @@ export class VertexAILLMAdapter implements LLMAdapter {
   }
 
   // Retryable POST with exponential backoff on 429 + 5xx. Honours the
-  // `Retry-After` header (seconds) when Vertex sends it.
+  // `Retry-After` header (seconds) when Scaleway sends it.
   async #postWithRetry(
     url: string,
     body: unknown,
@@ -135,54 +150,57 @@ export class VertexAILLMAdapter implements LLMAdapter {
     while (true) {
       const res = await this.#http(url, {
         method: 'POST',
-        headers: await this.#headers(),
+        headers: this.#headers(),
         body: JSON.stringify(body),
       });
       if (res.ok) return res;
       const retryable = res.status === 429 || res.status >= 500;
       if (!retryable || attempt >= this.#maxRetries) {
-        throw new Error(`Vertex ${label} failed: ${res.status} ${res.statusText}`);
+        throw new Error(`Scaleway ${label} failed: ${res.status} ${res.statusText}`);
       }
       const retryAfterHeader = res.headers.get('retry-after');
       const retryAfterSec = retryAfterHeader ? Number(retryAfterHeader) : NaN;
-      const waitMs = Number.isFinite(retryAfterSec) && retryAfterSec > 0
-        ? retryAfterSec * 1000
-        : this.#baseRetryDelayMs * Math.pow(2, attempt) + Math.random() * 500;
+      // `Retry-After: 0` is treated as "no useful hint, use exponential backoff"
+      // rather than "retry immediately". RFC 7231 does not mandate a literal-zero
+      // interpretation; falling through to backoff is at most as permissive and
+      // protects the server from a tight retry loop.
+      const waitMs =
+        Number.isFinite(retryAfterSec) && retryAfterSec > 0
+          ? retryAfterSec * 1000
+          : this.#baseRetryDelayMs * Math.pow(2, attempt) + Math.random() * 500;
       await new Promise((r) => setTimeout(r, waitMs));
       attempt++;
     }
   }
 
   async generate(request: LLMGenerationRequest): Promise<LLMGenerationResult> {
-    const model = this.#config.generationModel;
-    const url = `${this.#endpoint}/projects/${this.#config.projectId}/locations/${this.#region}/publishers/google/models/${model}:generateContent`;
-    const contents = [
-      ...request.context.map((c) => ({
-        role: c.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: c.content }],
-      })),
-      { role: 'user', parts: [{ text: request.userPrompt }] },
+    const model = this.#generationModel;
+    const url = `${this.#baseUrl}/${this.#projectId}/v1/chat/completions`;
+    const messages = [
+      { role: 'system', content: request.systemPrompt },
+      ...request.context.map((c) => ({ role: c.role, content: c.content })),
+      { role: 'user', content: request.userPrompt },
     ];
     const body = {
-      systemInstruction: { parts: [{ text: request.systemPrompt }] },
-      contents,
-      generationConfig: {
-        temperature: request.temperature,
-        maxOutputTokens: request.maxTokens,
-      },
+      model,
+      messages,
+      temperature: request.temperature,
+      max_tokens: request.maxTokens,
     };
     const res = await this.#postWithRetry(url, body, 'generate');
-    const data = (await res.json()) as VertexGenerateResponse;
-    const candidate = data.candidates?.[0];
-    const content = candidate?.content?.parts?.[0]?.text ?? '';
+    const data = (await res.json()) as ScalewayGenerateResponse;
+    const choice = data.choices?.[0];
+    // The `reasoning` field on choice.message carries Qwen3's chain-of-thought.
+    // It is not included in the returned content — the LLMAdapter contract is
+    // unchanged; callers receive only the visible response text.
     return {
-      content,
-      finishReason: mapVertexFinishReason(candidate?.finishReason),
-      model,
-      usage: data.usageMetadata
+      content: choice?.message?.content ?? '',
+      finishReason: mapOpenAIFinishReason(choice?.finish_reason),
+      model: data.model ?? model,
+      usage: data.usage
         ? {
-            promptTokens: data.usageMetadata.promptTokenCount ?? 0,
-            completionTokens: data.usageMetadata.candidatesTokenCount ?? 0,
+            promptTokens: data.usage.prompt_tokens ?? 0,
+            completionTokens: data.usage.completion_tokens ?? 0,
           }
         : undefined,
     };
@@ -194,19 +212,23 @@ export class VertexAILLMAdapter implements LLMAdapter {
   }
 
   /**
-   * Batch embed via Vertex's native multi-instance `:predict` endpoint.
-   * Vertex accepts up to 250 instances per call for text-embedding-004 and
-   * text-embedding-005; we chunk conservatively at 100 to stay well under
-   * the per-request payload size limit and keep individual retries small.
+   * Batch embed via Scaleway's embeddings endpoint (OpenAI-compatible).
+   * Scaleway accepts both single strings and arrays; we chunk conservatively
+   * at 100 to stay well under per-request payload size limits and keep
+   * individual retries small.
    *
-   * Concurrency across chunks is limited by the same embed-slot semaphore
-   * used by single embed(), so a caller passing 500 texts hits Vertex with
-   * `maxConcurrentEmbeds` simultaneous chunks, not 5 simultaneous chunks.
+   * Every request passes `dimensions: <embeddingDimensions>` to activate
+   * Matryoshka truncation (default 1024 per D071). Without this parameter
+   * the endpoint returns full 4096-dim vectors.
+   *
+   * Concurrency across chunks is limited by the embed-slot semaphore, so a
+   * caller passing 500 texts hits Scaleway with `maxConcurrentEmbeds`
+   * simultaneous chunks, not 5 simultaneous chunks.
    */
   async embedBatch(texts: string[]): Promise<Float32Array[]> {
     if (texts.length === 0) return [];
-    const model = this.#config.embeddingModel;
-    const url = `${this.#endpoint}/projects/${this.#config.projectId}/locations/${this.#region}/publishers/google/models/${model}:predict`;
+    const model = this.#embeddingModel;
+    const url = `${this.#baseUrl}/${this.#projectId}/v1/embeddings`;
     const CHUNK_SIZE = 100;
     const chunks: string[][] = [];
     for (let i = 0; i < texts.length; i += CHUNK_SIZE) {
@@ -216,10 +238,17 @@ export class VertexAILLMAdapter implements LLMAdapter {
       chunks.map(async (chunk) => {
         await this.#acquireEmbedSlot();
         try {
-          const body = { instances: chunk.map((content) => ({ content })) };
+          const body = {
+            model,
+            input: chunk,
+            dimensions: this.#embeddingDimensions,
+          };
           const res = await this.#postWithRetry(url, body, 'embed');
-          const data = (await res.json()) as VertexEmbedResponse;
-          return (data.predictions ?? []).map((p) => new Float32Array(p.embeddings?.values ?? []));
+          const data = (await res.json()) as ScalewayEmbedResponse;
+          // Scaleway returns an ordered array with stable `index` fields.
+          // Sort by index to guarantee input order is preserved.
+          const sorted = [...(data.data ?? [])].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+          return sorted.map((d) => new Float32Array(d.embedding ?? []));
         } finally {
           this.#releaseEmbedSlot();
         }
@@ -229,31 +258,17 @@ export class VertexAILLMAdapter implements LLMAdapter {
   }
 }
 
-interface VertexGenerateResponse {
-  candidates?: Array<{
-    content?: { parts?: Array<{ text?: string }> };
-    finishReason?: string;
+interface ScalewayGenerateResponse {
+  model?: string;
+  choices?: Array<{
+    message?: { content?: string; reasoning?: string };
+    finish_reason?: string;
   }>;
-  usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+  usage?: { prompt_tokens?: number; completion_tokens?: number };
 }
 
-interface VertexEmbedResponse {
-  predictions?: Array<{ embeddings?: { values?: number[] } }>;
-}
-
-function mapVertexFinishReason(reason?: string): LLMGenerationResult['finishReason'] {
-  switch (reason) {
-    case 'STOP':
-      return 'stop';
-    case 'MAX_TOKENS':
-      return 'length';
-    case 'SAFETY':
-      return 'content_filter';
-    case 'RECITATION':
-      return 'content_filter';
-    default:
-      return reason ? 'error' : 'stop';
-  }
+interface ScalewayEmbedResponse {
+  data?: Array<{ index?: number; embedding?: number[] }>;
 }
 
 // ---------------------------------------------------------------------------

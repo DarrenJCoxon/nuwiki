@@ -6,7 +6,7 @@
  * - WU 031: MetadataAdapter (Postgres reference impl)
  * - WU 032: ObjectStorageAdapter (Supabase / SharePoint / Drive reference impls; D018)
  * - WU 033: NuVectorAdapter (thin wrapper around @nusoft/nuvector)
- * - WU 034: LLMAdapter (Vertex AI reference impl)
+ * - WU 034: LLMAdapter (Scaleway reference impl — ScalewayLLMAdapter)
  * - WU 035: DatabaseSourceAdapter
  *
  * Where the contract specifies "no translation", types are imported verbatim
@@ -181,7 +181,7 @@ export interface LLMAdapter {
   embed(text: string): Promise<Float32Array>;
   /**
    * Optional batch embed. Adapters that support a native batch API (e.g.
-   * Vertex AI's `instances: [...]` array on `:predict`) implement this to
+   * Scaleway's embeddings endpoint with an `input` array) implement this to
    * cut per-minute quota pressure dramatically — one API call instead of
    * one per text. Callers prefer `embedBatch` when available; the
    * `embedAllOrBatch()` helper handles the fallback to N parallel `embed()`

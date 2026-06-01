@@ -126,7 +126,7 @@ export interface NuWikiConfig {
   /**
    * Optional token counter for summary-budget enforcement. Defaults to
    * the heuristic in `./tokens.js`. Consumers who need vendor-accurate
-   * counts inject their own (e.g. `tiktoken`, the Vertex tokenizer);
+   * counts inject their own (e.g. `tiktoken`, the Scaleway tokenizer);
    * NuWiki stays model-agnostic per D020.
    */
   tokenCounter?: (text: string) => number;
@@ -440,9 +440,9 @@ export class NuWiki {
     });
 
     // Compute embeddings (LLM used for embeddings only — no generative call).
-    // Use embedAllOrBatch so adapters with a native batch API (e.g. Vertex AI's
-    // multi-instance :predict) submit one API call per ~100 texts instead of
-    // one per text, which avoids tripping per-minute quotas on first-time seeds.
+    // Use embedAllOrBatch so adapters with a native batch API (e.g. Scaleway's
+    // embeddings endpoint with input array) submit one API call per ~100 texts
+    // instead of one per text, which avoids tripping per-minute quotas on first-time seeds.
     const usePrefix = docType.retrievalHints.embedSectionsWithSummaryPrefix !== false;
     const sectionTexts = structuredBody.sections.map((s) =>
       buildSectionEmbeddingText(structuredBody.summary, s, { withPrefix: usePrefix }),
