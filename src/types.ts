@@ -513,6 +513,110 @@ export interface WorkflowIntentEnvelope {
 }
 
 // ---------------------------------------------------------------------------
+// Render / splice / drift surface (WU 113a — D132 sanctioned)
+// ---------------------------------------------------------------------------
+
+/**
+ * Options for `renderArticleMarkdown`.
+ *
+ * All fields are optional — calling with no options renders the full article.
+ */
+export interface RenderArticleMarkdownOptions {
+  /**
+   * Restrict output to these section keys only (by `section.key`).
+   * Sections are still sorted by `position` within the subset.
+   * If omitted, all sections are rendered.
+   */
+  sections?: string[];
+  /**
+   * When provided, a YAML-style front-matter block is prepended.
+   * The value is an arbitrary record; callers control shape (e.g.
+   * `{ title, documentType, subject, renderedAt }`).
+   */
+  frontMatter?: Record<string, unknown>;
+}
+
+/**
+ * Configuration for a sentinel-delimited region scheme.
+ *
+ * A sentinel pair marks the start and end of a generated region in a file.
+ * The sentinel format is caller-controlled — NuWiki core has no knowledge of
+ * STATE.md's specific markers or any other consumer's scheme.
+ *
+ * Concrete example (STATE.md uses HTML-comment sentinels):
+ * ```
+ * {
+ *   markerPattern: 'nuos:generated:{{key}}',
+ *   openTemplate: '<!-- {{marker}}:start -->',
+ *   closeTemplate: '<!-- {{marker}}:end -->',
+ * }
+ * ```
+ * where `{{key}}` is replaced with the region key and `{{marker}}` is replaced
+ * with the expanded marker string.
+ */
+export interface SentinelConfig {
+  /**
+   * Template for the marker name. `{{key}}` is replaced with the region key.
+   * Example: `'nuos:generated:{{key}}'` → `'nuos:generated:active_wu'`
+   */
+  markerPattern: string;
+  /**
+   * Template for the opening sentinel line. `{{marker}}` is replaced with the
+   * expanded marker name. Example: `'<!-- {{marker}}:start -->'`
+   */
+  openTemplate: string;
+  /**
+   * Template for the closing sentinel line. `{{marker}}` is replaced with the
+   * expanded marker name. Example: `'<!-- {{marker}}:end -->'`
+   */
+  closeTemplate: string;
+}
+
+/**
+ * Result of `spliceGeneratedRegions`.
+ */
+export interface SpliceResult {
+  /** The merged file content with generated regions replaced. */
+  merged: string;
+  /** Keys of regions that were updated (content changed). */
+  updatedRegions: string[];
+  /** Keys of regions whose content was unchanged (idempotent). */
+  unchangedRegions: string[];
+}
+
+/**
+ * Per-region status reported by `checkArticleDrift`.
+ */
+export type RegionDriftStatus = 'clean' | 'drifted' | 'missing';
+
+/**
+ * Per-region entry in a `DriftReport`.
+ */
+export interface RegionDriftEntry {
+  key: string;
+  status: RegionDriftStatus;
+  /**
+   * Present when `status === 'drifted'`: the content currently in the file
+   * differs from what the canonical source produces.
+   */
+  actualContent?: string;
+  /**
+   * Present when `status === 'drifted'`: what the canonical source produces.
+   */
+  expectedContent?: string;
+}
+
+/**
+ * Result of `checkArticleDrift`.
+ */
+export interface DriftReport {
+  /** True only when every expected region is present and matches the source. */
+  clean: boolean;
+  /** Per-region breakdown. */
+  regions: RegionDriftEntry[];
+}
+
+// ---------------------------------------------------------------------------
 // Re-export selected NuVector types so consumers don't need a direct dep
 // ---------------------------------------------------------------------------
 

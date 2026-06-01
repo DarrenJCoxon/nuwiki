@@ -111,6 +111,15 @@ export {
 export type { SuggestionEngineConfig } from './suggestions.js';
 export { defineWikiPack } from './pack.js';
 export type { WikiPack } from './pack.js';
+export {
+  renderArticleMarkdown,
+  spliceGeneratedRegions,
+  checkArticleDrift,
+} from './render-splice-drift.js';
+export type {
+  SpliceGeneratedRegionsArgs,
+  CheckArticleDriftArgs,
+} from './render-splice-drift.js';
 
 export interface NuWikiConfig {
   metadata: MetadataAdapter;

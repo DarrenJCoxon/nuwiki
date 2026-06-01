@@ -4,6 +4,52 @@ All notable changes to `@nusoft/nuwiki` will be documented here.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project follows semantic versioning.
 
+## [0.3.0] — 2026-06-01
+
+### Added — render / splice / drift core primitives (WU 113a — D132)
+
+Three new reusable, model-agnostic, STATE-agnostic public functions:
+
+**`renderArticleMarkdown(article, options?) → string`** — promote the internal
+`renderMarkdownBody` to a fully documented public export. Accepts either an
+`LLMCompilationOutput` (the structured form produced by `seed()` or the
+compilation engine) or a `RenderedArticle` (the `read()`-time projection).
+Sections are always sorted by `position` for a stable, deterministic output
+order. Options: `sections` (restrict to a subset of section keys) and
+`frontMatter` (prepend a YAML-style front-matter block).
+
+**`spliceGeneratedRegions({ existingFile, regions, sentinelConfig }) → SpliceResult`**
+— merge generated region markdown into sentinel-delimited regions of an
+existing file **without touching any byte outside those regions**. The sentinel
+scheme is fully caller-controlled via `SentinelConfig` (a marker-pattern +
+open/close template pair). Idempotent: re-splicing identical content is a no-op
+and the merged string equals the input. Throws clearly when a region key has no
+matching sentinel pair in the file or a pair is malformed.
+
+**`checkArticleDrift({ file, sentinelConfig, expectedRegions }) → DriftReport`**
+— verify that the generated regions of an on-disk file match what the canonical
+source currently produces. Returns `{ clean: true }` when all regions match;
+names the drifted and/or missing regions otherwise. Distinct from
+`runIntegrityPass` (which checks NuWiki article freshness); this surface checks
+the on-disk file against the caller's expected content — the interface the
+pre-commit hook calls.
+
+**New types exported from `@nusoft/nuwiki`:**
+`RenderArticleMarkdownOptions`, `SentinelConfig`, `SpliceResult`,
+`SpliceGeneratedRegionsArgs`, `CheckArticleDriftArgs`, `DriftReport`,
+`RegionDriftEntry`, `RegionDriftStatus`.
+
+The three primitives carry no STATE-specific, catalogue-specific, or domain
+knowledge. The caller supplies: a `sentinelConfig` for its chosen marker scheme,
+the region content (from any source adapter), and the file path. This makes the
+surface reusable verbatim by WU 081 (Sensight pupil/EHCP articles) by swapping
+to a pupil source adapter + a pupil `DocumentType` + a pupil `SentinelConfig`.
+
+The internal `renderMarkdownBody` in `compilation.ts` now delegates to
+`renderArticleMarkdown` so both paths remain consistent.
+
+See [WU 113a](https://github.com/DarrenJCoxon/nuos/blob/main/docs/build/work-units/113a-nuwiki-core-render-splice-drift-capability.md) and [D132](https://github.com/DarrenJCoxon/nuos/blob/main/docs/build/decisions/D132-state-md-mode-2-hybrid-compile-via-nuwiki-deterministic-document-type.md).
+
 ## [0.2.0] — 2026-05-20
 
 ### Changed — Scaleway replaces Vertex AI as the reference cloud LLM adapter

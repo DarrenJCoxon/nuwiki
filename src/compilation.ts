@@ -48,6 +48,7 @@ import type {
 import { estimateTokenCount } from './tokens.js';
 import { validateCitations } from './citations.js';
 import { BrokenLinkChecker } from './backlinks.js';
+import { renderArticleMarkdown } from './render-splice-drift.js';
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -730,11 +731,8 @@ export function buildSectionEmbeddingText(
 }
 
 function renderMarkdownBody(o: LLMCompilationOutput): string {
-  const lines: string[] = [];
-  for (const s of [...o.sections].sort((a, b) => a.position - b.position)) {
-    lines.push(`## ${s.heading}`, '', s.text, '');
-  }
-  return lines.join('\n').trim() + '\n';
+  // Delegates to the public renderArticleMarkdown (promoted in WU 113a — D132).
+  return renderArticleMarkdown(o);
 }
 
 function buildSystemPrompt(docType: DocumentType): string {
